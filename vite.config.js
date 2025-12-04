@@ -13,5 +13,8 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+  },
+  build: {
+    outDir: 'docs', // 將打包輸出目錄改為 docs，以配合 GitHub Pages
   }
 })

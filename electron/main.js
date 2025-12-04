@@ -38,7 +38,8 @@ function createWindow() {
     mainWindow.webContents.openDevTools();
   } else {
     // 打包後讀取編譯好的 index.html
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    // 注意：這裡必須配合 vite.config.js 將 dist 改為 docs
+    mainWindow.loadFile(path.join(__dirname, '../docs/index.html'));
   }
 }
 

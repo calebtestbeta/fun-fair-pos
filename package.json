@@ -36,7 +36,7 @@
       "output": "dist_electron"
     },
     "files": [
-      "dist/**/*",
+      "docs/**/*",
       "electron/**/*"
     ],
     "win": {
