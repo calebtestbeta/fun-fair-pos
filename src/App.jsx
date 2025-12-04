@@ -144,8 +144,8 @@ const Numpad = ({ onInput, onDelete, className = "" }) => {
   );
 };
 
-// --- Modal Component ---
-const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMPTY_ARRAY, paymentInfo = null, editItems = null, allProducts = [] }) => {
+// --- Modal Component (加入自動關閉功能) ---
+const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMPTY_ARRAY, paymentInfo = null, editItems = null, allProducts = [], autoCloseDelay = null }) => {
   const [inputValues, setInputValues] = useState({});
   const [receivedAmount, setReceivedAmount] = useState('');
   const [currentEditItems, setCurrentEditItems] = useState([]);
@@ -153,6 +153,16 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
   const [activeInput, setActiveInput] = useState(null); 
 
   const changeAmount = paymentInfo ? (parseInt(receivedAmount || 0) - paymentInfo.total) : 0;
+
+  // 自動關閉計時器
+  useEffect(() => {
+    if (isOpen && autoCloseDelay) {
+      const timer = setTimeout(() => {
+        if (onConfirm) onConfirm();
+      }, autoCloseDelay);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, autoCloseDelay, onConfirm]);
 
   useEffect(() => {
     if (isOpen) {
@@ -938,15 +948,19 @@ export default function App() {
     });
   };
 
-  const handleBarcodeSubmit = (e) => {
-    e.preventDefault();
+  // --- 改名後的輸入處理 (取代原 onChange Handler) ---
+  const handleBarcodeInput = (e) => {
     const value = e.target.value;
-    setBarcodeInput(value);
+    // 全形轉半形 (Full-width to Half-width)
+    const normalizedValue = value.replace(/[\uff01-\uff5e]/g, function(ch) {
+       return String.fromCharCode(ch.charCodeAt(0) - 0xfee0);
+    });
+    
+    setBarcodeInput(normalizedValue);
 
-    // Instant Match Logic
-    const matchedProduct = products.find(p => p.barcode === value.trim());
+    // Instant Match Logic (保留即時掃描功能)
+    const matchedProduct = products.find(p => p.barcode === normalizedValue.trim());
     if (matchedProduct) {
-      // Debounce Check
       const now = Date.now();
       if (now - lastScanTimeRef.current < 500) {
         console.log("Scan ignored (debounce)");
@@ -957,6 +971,39 @@ export default function App() {
 
       addToCart(matchedProduct);
       setBarcodeInput(""); // Clear input immediately
+    }
+  };
+
+  // --- 新增：表單送出處理 (處理按下 Enter 且未匹配到的情況) ---
+  const handleBarcodeSubmit = (e) => {
+    e.preventDefault();
+    const code = barcodeInput.trim();
+    if (!code) return; // 空值不處理
+
+    // 如果執行到這裡，代表 input 有值，但 onChange 沒抓到 (可能是輸入錯誤的條碼)
+    // 再次確認是否真的沒有這個商品
+    const product = products.find(p => p.barcode === code);
+    
+    if (product) {
+       // 如果其實有 (極端情況)，就加入
+       const now = Date.now();
+       if (now - lastScanTimeRef.current > 500) {
+          lastScanTimeRef.current = now;
+          addToCart(product);
+       }
+       setBarcodeInput("");
+    } else {
+       // 真的找不到 -> 報錯
+       playSound('error');
+       setModalConfig({
+        isOpen: true,
+        type: 'danger', // 使用紅色警告樣式
+        title: '查無此商品',
+        message: `系統找不到條碼為「${code}」的商品。\n視窗將於 2.5 秒後自動關閉，請準備重新掃描。`,
+        onConfirm: closeModal, // 點確定後關閉
+        autoCloseDelay: 2500 // 2.5秒自動關閉
+       });
+       setBarcodeInput(""); // 清空輸入框
     }
   };
 
@@ -1001,6 +1048,7 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-gray-50 text-gray-900 font-sans overflow-hidden relative text-lg">
       <Modal {...modalConfig} />
+      {/* 隱藏的檔案上傳 Input */}
       <input 
         type="file" 
         ref={fileInputRef} 
@@ -1062,10 +1110,12 @@ export default function App() {
                       className={`min-h-[160px] flex flex-col justify-between p-4 rounded-2xl border-b-8 transition-all shadow-md relative group
                         ${isSoldOut ? 'bg-gray-100 border-gray-200 text-gray-400/50 cursor-not-allowed' : `${getCategoryColor(product.category)} active:scale-95 hover:shadow-xl hover:-translate-y-1`}`}
                     >
+                      {/* 售完時的標籤，不遮擋文字 */}
                       {isSoldOut && <div className="absolute top-2 right-2 bg-red-600 text-white text-sm font-black px-3 py-1 rounded-full shadow-md z-10 animate-pulse">已售完</div>}
                       
                       <div className="w-full flex justify-between items-start mb-2">
                         <span className={`text-lg font-black px-2 py-1 rounded-lg ${isSoldOut ? 'bg-gray-200 text-gray-400' : 'bg-white/60 text-gray-800'}`}>{product.category}</span>
+                        {/* 庫存顯示 - 改為文字標籤 */}
                         {!isSoldOut && <span className={`text-lg font-bold px-2 py-1 rounded-lg flex items-center gap-1 ${product.stock < 10 ? 'bg-red-100 text-red-700' : 'bg-white/60 text-gray-700'}`}>
                           剩餘 {product.stock}
                         </span>}
@@ -1089,9 +1139,9 @@ export default function App() {
 
             <div className="w-[450px] flex-none bg-white flex flex-col border-l-2 border-gray-300 shadow-2xl z-20">
               <div className="p-4 bg-slate-800 text-white">
-                <form onSubmit={e => e.preventDefault()} className="relative">
+                <form onSubmit={handleBarcodeSubmit} className="relative">
                   <QrCode className="absolute left-3 top-3.5 text-gray-400" size={24} />
-                  <input ref={barcodeInputRef} type="text" value={barcodeInput} onChange={handleBarcodeSubmit} placeholder="掃描條碼 (Focus)" className="w-full bg-slate-700 border-2 border-slate-600 rounded-xl pl-12 pr-4 py-3 text-xl text-white placeholder-gray-400 focus:ring-4 focus:ring-blue-500 focus:outline-none font-bold" autoFocus />
+                  <input ref={barcodeInputRef} type="text" value={barcodeInput} onChange={handleBarcodeInput} placeholder="掃描條碼 (Focus)" className="w-full bg-slate-700 border-2 border-slate-600 rounded-xl pl-12 pr-4 py-3 text-xl text-white placeholder-gray-400 focus:ring-4 focus:ring-blue-500 focus:outline-none font-bold" autoFocus />
                 </form>
               </div>
 
