@@ -28,7 +28,7 @@ import {
   Upload,
   FileText,
   Delete,
-  FileDown // 新增圖示
+  FileDown
 } from 'lucide-react';
 
 // --- MOCK DATA: 預設商品清單 ---
@@ -150,7 +150,6 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
   const [receivedAmount, setReceivedAmount] = useState('');
   const [currentEditItems, setCurrentEditItems] = useState([]);
   const [selectedProductId, setSelectedProductId] = useState('');
-  
   const [activeInput, setActiveInput] = useState(null); 
 
   const changeAmount = paymentInfo ? (parseInt(receivedAmount || 0) - paymentInfo.total) : 0;
@@ -171,7 +170,6 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
         setReceivedAmount('');
         setActiveInput('received');
       }
-      
       setSelectedProductId('');
     }
   }, [isOpen, inputs, editItems, type]);
@@ -305,7 +303,6 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
         </div>
         
         <div className={`flex flex-col md:flex-row h-full overflow-hidden`}>
-          
           <div className="flex-1 p-8 overflow-y-auto">
             {message && <p className="text-gray-800 text-xl font-medium mb-6 leading-relaxed whitespace-pre-line">{message}</p>}
             
@@ -479,7 +476,7 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
 
 // --- 主程式元件 ---
 export default function App() {
-  const [currentView, setCurrentView] = useState('pos'); // pos, history, inventory
+  const [currentView, setCurrentView] = useState('pos');
   
   // STATE: 讀取 LocalStorage 或使用預設值
   const [products, setProducts] = useState(() => {
@@ -611,7 +608,7 @@ export default function App() {
           },
           onConfirm: () => {
             setProducts(newProducts);
-            setSelectedCategory("全部"); // 重置分類選擇
+            setSelectedCategory("全部"); 
             playSound('cash');
             closeModal();
             event.target.value = '';
@@ -643,7 +640,7 @@ export default function App() {
     const currentStock = product.stock;
     const existingInCart = cart.find(i => i.id === product.id);
     const qtyInCart = existingInCart ? existingInCart.qty : 0;
-    const finalQty = qty; // 移除倍數邏輯
+    const finalQty = qty; 
     
     if (product.isCustom || (currentStock - qtyInCart - finalQty >= 0)) {
       setCart(prev => {
@@ -778,7 +775,6 @@ export default function App() {
     });
   };
 
-  // --- 結帳流程 ---
   const handleCheckout = () => {
     if (cart.length === 0) {
       playSound('error');
@@ -820,8 +816,6 @@ export default function App() {
     });
   };
 
-  // --- 匯出功能 ---
-  // 1. 匯出訂單 CSV (原始功能)
   const handleExportCSV = () => {
     if (transactions.length === 0) {
       setModalConfig({ isOpen: true, type: 'info', title: '無資料', message: '目前沒有銷售紀錄可供匯出。', onConfirm: closeModal });
@@ -857,15 +851,13 @@ export default function App() {
     playSound('cash');
   };
 
-  // 2. 匯出商品銷售統計 CSV (新功能)
   const handleExportProductCSV = () => {
     if (transactions.length === 0) {
       setModalConfig({ isOpen: true, type: 'info', title: '無資料', message: '目前沒有銷售紀錄可供匯出。', onConfirm: closeModal });
       return;
     }
 
-    // 統計邏輯
-    const productStats = {}; // { "商品名": { qty: 0, revenue: 0, category: "" } }
+    const productStats = {};
 
     transactions.forEach(t => {
       t.items.forEach(item => {
@@ -906,11 +898,10 @@ export default function App() {
       type: 'edit-transaction',
       title: '修改訂單內容',
       message: '您可以修改此筆訂單的商品內容與數量。',
-      editItems: transaction.items, // 傳入目前的商品項目
-      allProducts: products, // 傳入所有商品供選擇
+      editItems: transaction.items, 
+      allProducts: products, 
       onCancel: closeModal,
       onConfirm: (newItems) => {
-        // 1. 如果商品都被刪光了，詢問是否直接刪除訂單
         if (newItems.length === 0) {
           if(confirm("商品已全部清空，是否直接刪除此筆訂單？")) {
             voidTransaction(transaction.id);
@@ -918,17 +909,15 @@ export default function App() {
           return;
         }
 
-        // 2. 計算新的總金額
         const newTotal = newItems.reduce((sum, item) => sum + (item.price * item.qty), 0);
 
-        // 3. 更新 transactions state (加入 isModified 標記)
         setTransactions(prev => prev.map(t => 
           t.id === transaction.id 
             ? { ...t, items: newItems, total: newTotal, isModified: true, lastModified: new Date().toLocaleString() } 
             : t
         ));
 
-        playSound('cash'); // 修正成功音效
+        playSound('cash'); 
         closeModal();
       }
     });
@@ -951,24 +940,23 @@ export default function App() {
 
   const handleBarcodeSubmit = (e) => {
     e.preventDefault();
-    const code = barcodeInput.trim();
-    if (!code) return;
+    const value = e.target.value;
+    setBarcodeInput(value);
 
-    const now = Date.now();
-    if (now - lastScanTimeRef.current < 500) {
-      console.log("Scan ignored (debounce)");
-      setBarcodeInput(""); 
-      return;
-    }
-    lastScanTimeRef.current = now;
+    // Instant Match Logic
+    const matchedProduct = products.find(p => p.barcode === value.trim());
+    if (matchedProduct) {
+      // Debounce Check
+      const now = Date.now();
+      if (now - lastScanTimeRef.current < 500) {
+        console.log("Scan ignored (debounce)");
+        setBarcodeInput("");
+        return;
+      }
+      lastScanTimeRef.current = now;
 
-    const product = products.find(p => p.barcode === code);
-    if (product) {
-      addToCart(product);
-      setBarcodeInput("");
-    } else {
-      playSound('error');
-      setBarcodeInput("");
+      addToCart(matchedProduct);
+      setBarcodeInput(""); // Clear input immediately
     }
   };
 
@@ -990,7 +978,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [cart, modalConfig]);
 
-  // --- Rendering Helpers ---
   const filteredProducts = products.filter(p => {
     const matchCat = selectedCategory === "全部" || p.category === selectedCategory;
     const matchSearch = p.name.includes(searchQuery) || p.barcode.includes(searchQuery);
@@ -1014,7 +1001,6 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-gray-50 text-gray-900 font-sans overflow-hidden relative text-lg">
       <Modal {...modalConfig} />
-      {/* 隱藏的檔案上傳 Input */}
       <input 
         type="file" 
         ref={fileInputRef} 
@@ -1044,11 +1030,9 @@ export default function App() {
       </header>
 
       <main className="flex-1 flex overflow-hidden">
-        {/* VIEW: 收銀台 (POS) */}
         {currentView === 'pos' && (
           <>
             <div className="flex-1 flex flex-col border-r-2 border-gray-200 bg-white">
-              {/* 工具列 */}
               <div className="p-4 border-b-2 border-gray-200 bg-gray-100 flex gap-4 overflow-x-auto items-center">
                 <div className="relative flex-none">
                   <Search className="absolute left-4 top-4 text-gray-500" size={24} />
@@ -1062,7 +1046,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 商品列表 (已移除倍數區) */}
               <div className="flex-1 p-6 overflow-y-auto bg-slate-50">
                 <div className="grid grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4 content-start">
                   <button onClick={handleCustomProduct} className="min-h-[160px] h-full flex flex-col items-center justify-center p-4 rounded-2xl border-4 border-dashed border-gray-300 bg-white text-gray-500 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-600 transition-all shadow-sm active:scale-95 group">
@@ -1079,12 +1062,10 @@ export default function App() {
                       className={`min-h-[160px] flex flex-col justify-between p-4 rounded-2xl border-b-8 transition-all shadow-md relative group
                         ${isSoldOut ? 'bg-gray-100 border-gray-200 text-gray-400/50 cursor-not-allowed' : `${getCategoryColor(product.category)} active:scale-95 hover:shadow-xl hover:-translate-y-1`}`}
                     >
-                      {/* 售完時的標籤，不遮擋文字 */}
                       {isSoldOut && <div className="absolute top-2 right-2 bg-red-600 text-white text-sm font-black px-3 py-1 rounded-full shadow-md z-10 animate-pulse">已售完</div>}
                       
                       <div className="w-full flex justify-between items-start mb-2">
                         <span className={`text-lg font-black px-2 py-1 rounded-lg ${isSoldOut ? 'bg-gray-200 text-gray-400' : 'bg-white/60 text-gray-800'}`}>{product.category}</span>
-                        {/* 庫存顯示 - 改為文字標籤 */}
                         {!isSoldOut && <span className={`text-lg font-bold px-2 py-1 rounded-lg flex items-center gap-1 ${product.stock < 10 ? 'bg-red-100 text-red-700' : 'bg-white/60 text-gray-700'}`}>
                           剩餘 {product.stock}
                         </span>}
@@ -1106,12 +1087,11 @@ export default function App() {
               </div>
             </div>
 
-            {/* 右側購物車 (加寬與加大按鈕) */}
             <div className="w-[450px] flex-none bg-white flex flex-col border-l-2 border-gray-300 shadow-2xl z-20">
               <div className="p-4 bg-slate-800 text-white">
-                <form onSubmit={handleBarcodeSubmit} className="relative">
+                <form onSubmit={e => e.preventDefault()} className="relative">
                   <QrCode className="absolute left-3 top-3.5 text-gray-400" size={24} />
-                  <input ref={barcodeInputRef} type="text" value={barcodeInput} onChange={e => setBarcodeInput(e.target.value)} placeholder="掃描條碼 (Focus)" className="w-full bg-slate-700 border-2 border-slate-600 rounded-xl pl-12 pr-4 py-3 text-xl text-white placeholder-gray-400 focus:ring-4 focus:ring-blue-500 focus:outline-none font-bold" autoFocus />
+                  <input ref={barcodeInputRef} type="text" value={barcodeInput} onChange={handleBarcodeSubmit} placeholder="掃描條碼 (Focus)" className="w-full bg-slate-700 border-2 border-slate-600 rounded-xl pl-12 pr-4 py-3 text-xl text-white placeholder-gray-400 focus:ring-4 focus:ring-blue-500 focus:outline-none font-bold" autoFocus />
                 </form>
               </div>
 
@@ -1148,7 +1128,6 @@ export default function App() {
           </>
         )}
 
-        {/* VIEW: 庫存管理 (Inventory) - 大字版 */}
         {currentView === 'inventory' && (
           <div className="flex-1 bg-white p-8 overflow-y-auto">
             <div className="max-w-6xl mx-auto">
@@ -1194,7 +1173,6 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW: 銷售紀錄 (History) - 大字版 */}
         {currentView === 'history' && (
           <div className="flex-1 bg-white p-8 overflow-y-auto">
              <div className="max-w-6xl mx-auto">
