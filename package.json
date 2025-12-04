@@ -1,0 +1,63 @@
+{
+  "name": "fun-fair-pos",
+  "private": true,
+  "version": "3.0.0",
+  "main": "electron/main.js",
+  "description": "園遊會專用離線 POS 系統",
+  "author": "Your Name",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && electron-builder",
+    "build:win": "vite build && electron-builder --win",
+    "build:mac": "vite build && electron-builder --mac",
+    "preview": "vite preview",
+    "electron:start": "electron ."
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "lucide-react": "^0.263.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "autoprefixer": "^10.4.14",
+    "electron": "^25.0.0",
+    "electron-builder": "^24.4.0",
+    "postcss": "^8.4.24",
+    "tailwindcss": "^3.3.2",
+    "vite": "^4.3.9",
+    "concurrently": "^8.0.0",
+    "wait-on": "^7.0.0"
+  },
+  "build": {
+    "appId": "com.funfair.pos",
+    "productName": "園遊會POS",
+    "directories": {
+      "output": "dist_electron"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/icon.ico",
+      "artifactName": "${productName}_Portable_${version}.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "public/icon.icns",
+      "artifactName": "${productName}_Mac_${version}.${ext}"
+    }
+  }
+}
