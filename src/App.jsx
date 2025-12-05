@@ -28,7 +28,8 @@ import {
   Upload,
   FileText,
   Delete,
-  FileDown
+  FileDown,
+  Keyboard // 新增鍵盤圖示
 } from 'lucide-react';
 
 // --- MOCK DATA: 預設商品清單 ---
@@ -144,13 +145,16 @@ const Numpad = ({ onInput, onDelete, className = "" }) => {
   );
 };
 
-// --- Modal Component (加入自動關閉功能) ---
+// --- Modal Component (加入虛擬鍵盤控制) ---
 const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMPTY_ARRAY, paymentInfo = null, editItems = null, allProducts = [], autoCloseDelay = null }) => {
   const [inputValues, setInputValues] = useState({});
   const [receivedAmount, setReceivedAmount] = useState('');
   const [currentEditItems, setCurrentEditItems] = useState([]);
   const [selectedProductId, setSelectedProductId] = useState('');
   const [activeInput, setActiveInput] = useState(null); 
+  
+  // 控制是否使用原生鍵盤
+  const [useNativeKeyboard, setUseNativeKeyboard] = useState(false);
 
   const changeAmount = paymentInfo ? (parseInt(receivedAmount || 0) - paymentInfo.total) : 0;
 
@@ -181,6 +185,7 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
         setActiveInput('received');
       }
       setSelectedProductId('');
+      setUseNativeKeyboard(false); // 每次開啟 Modal 預設關閉原生鍵盤
     }
   }, [isOpen, inputs, editItems, type]);
 
@@ -319,22 +324,34 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
             {inputs.length > 0 && (
               <div className="space-y-6 mb-6">
                 {inputs.map((input) => (
-                  <div key={input.name}>
+                  <div key={input.name} className="relative">
                     <label className="block text-lg font-bold text-gray-700 mb-2">{input.label}</label>
-                    <input
-                      type={input.type || 'text'}
-                      name={input.name}
-                      value={inputValues[input.name] || ''}
-                      onChange={handleInputChange}
-                      readOnly={input.readOnly}
-                      onFocus={() => !input.readOnly && setActiveInput(input.name)}
-                      className={`w-full px-6 py-4 border-2 rounded-xl focus:outline-none text-2xl font-bold text-gray-900 
-                        ${activeInput === input.name ? 'border-blue-500 ring-4 ring-blue-200' : 'border-gray-300'}
-                        ${input.readOnly ? 'bg-gray-100 text-gray-500' : 'bg-white'}
-                      `}
-                      autoFocus={input.autoFocus}
-                      placeholder={input.placeholder}
-                    />
+                    <div className="flex gap-2">
+                        <input
+                        type={input.type || 'text'}
+                        name={input.name}
+                        value={inputValues[input.name] || ''}
+                        onChange={handleInputChange}
+                        readOnly={input.readOnly}
+                        inputMode={useNativeKeyboard ? (input.type === 'number' ? 'numeric' : 'text') : 'none'} // 控制 iPad 鍵盤
+                        onFocus={() => !input.readOnly && setActiveInput(input.name)}
+                        className={`w-full px-6 py-4 border-2 rounded-xl focus:outline-none text-2xl font-bold text-gray-900 
+                            ${activeInput === input.name ? 'border-blue-500 ring-4 ring-blue-200' : 'border-gray-300'}
+                            ${input.readOnly ? 'bg-gray-100 text-gray-500' : 'bg-white'}
+                        `}
+                        autoFocus={input.autoFocus}
+                        placeholder={input.placeholder}
+                        />
+                        {!input.readOnly && (
+                            <button
+                                onClick={() => setUseNativeKeyboard(!useNativeKeyboard)}
+                                className={`px-4 rounded-xl border-2 transition-colors ${useNativeKeyboard ? 'bg-blue-600 text-white border-blue-600' : 'bg-gray-100 text-gray-500 border-gray-300'}`}
+                                title="切換虛擬鍵盤"
+                            >
+                                <Keyboard size={24} />
+                            </button>
+                        )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -385,6 +402,7 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
                             <input 
                               type="number" 
                               value={item.price} 
+                              inputMode={useNativeKeyboard ? 'numeric' : 'none'}
                               onFocus={() => setActiveInput(`edit-${idx}-price`)}
                               onChange={(e) => handleEditItemChange(idx, 'price', parseInt(e.target.value))}
                               className={`w-24 p-2 border-2 rounded-lg font-bold text-center text-xl focus:outline-none 
@@ -422,18 +440,28 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
                 
                 <div>
                   <label className="block text-xl font-bold text-gray-800 mb-3">實收金額 (可不填)</label>
-                  <div className="relative">
-                    <span className="absolute left-5 top-4 text-gray-400 text-3xl font-bold">$</span>
-                    <input 
-                      type="number" 
-                      value={receivedAmount}
-                      onFocus={() => setActiveInput('received')}
-                      onChange={(e) => setReceivedAmount(e.target.value)}
-                      className={`w-full pl-10 pr-6 py-4 text-4xl font-black border-4 rounded-2xl focus:outline-none transition-all text-gray-900
-                        ${activeInput === 'received' ? 'border-emerald-600 ring-4 ring-emerald-100' : 'border-emerald-200'}`}
-                      placeholder={paymentInfo.total}
-                      autoFocus
-                    />
+                  <div className="relative flex gap-2">
+                    <div className="relative flex-1">
+                        <span className="absolute left-5 top-4 text-gray-400 text-3xl font-bold">$</span>
+                        <input 
+                        type="number" 
+                        value={receivedAmount}
+                        inputMode={useNativeKeyboard ? 'numeric' : 'none'}
+                        onFocus={() => setActiveInput('received')}
+                        onChange={(e) => setReceivedAmount(e.target.value)}
+                        className={`w-full pl-10 pr-6 py-4 text-4xl font-black border-4 rounded-2xl focus:outline-none transition-all text-gray-900
+                            ${activeInput === 'received' ? 'border-emerald-600 ring-4 ring-emerald-100' : 'border-emerald-200'}`}
+                        placeholder={paymentInfo.total}
+                        autoFocus
+                        />
+                    </div>
+                    <button
+                        onClick={() => setUseNativeKeyboard(!useNativeKeyboard)}
+                        className={`px-4 rounded-2xl border-4 transition-colors ${useNativeKeyboard ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-gray-100 text-gray-500 border-gray-300'}`}
+                        title="切換虛擬鍵盤"
+                    >
+                        <Keyboard size={32} />
+                    </button>
                   </div>
                   <div className="flex gap-3 mt-4">
                     {[100, 500, 1000].map(amt => (
@@ -948,17 +976,14 @@ export default function App() {
     });
   };
 
-  // --- 改名後的輸入處理 (取代原 onChange Handler) ---
   const handleBarcodeInput = (e) => {
     const value = e.target.value;
-    // 全形轉半形 (Full-width to Half-width)
     const normalizedValue = value.replace(/[\uff01-\uff5e]/g, function(ch) {
        return String.fromCharCode(ch.charCodeAt(0) - 0xfee0);
     });
     
     setBarcodeInput(normalizedValue);
 
-    // Instant Match Logic (保留即時掃描功能)
     const matchedProduct = products.find(p => p.barcode === normalizedValue.trim());
     if (matchedProduct) {
       const now = Date.now();
@@ -970,22 +995,18 @@ export default function App() {
       lastScanTimeRef.current = now;
 
       addToCart(matchedProduct);
-      setBarcodeInput(""); // Clear input immediately
+      setBarcodeInput(""); 
     }
   };
 
-  // --- 新增：表單送出處理 (處理按下 Enter 且未匹配到的情況) ---
   const handleBarcodeSubmit = (e) => {
     e.preventDefault();
     const code = barcodeInput.trim();
-    if (!code) return; // 空值不處理
+    if (!code) return; 
 
-    // 如果執行到這裡，代表 input 有值，但 onChange 沒抓到 (可能是輸入錯誤的條碼)
-    // 再次確認是否真的沒有這個商品
     const product = products.find(p => p.barcode === code);
     
     if (product) {
-       // 如果其實有 (極端情況)，就加入
        const now = Date.now();
        if (now - lastScanTimeRef.current > 500) {
           lastScanTimeRef.current = now;
@@ -993,17 +1014,16 @@ export default function App() {
        }
        setBarcodeInput("");
     } else {
-       // 真的找不到 -> 報錯
        playSound('error');
        setModalConfig({
         isOpen: true,
-        type: 'danger', // 使用紅色警告樣式
+        type: 'danger', 
         title: '查無此商品',
         message: `系統找不到條碼為「${code}」的商品。\n視窗將於 2.5 秒後自動關閉，請準備重新掃描。`,
-        onConfirm: closeModal, // 點確定後關閉
-        autoCloseDelay: 2500 // 2.5秒自動關閉
+        onConfirm: closeModal, 
+        autoCloseDelay: 2500 
        });
-       setBarcodeInput(""); // 清空輸入框
+       setBarcodeInput(""); 
     }
   };
 
@@ -1048,7 +1068,6 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-gray-50 text-gray-900 font-sans overflow-hidden relative text-lg">
       <Modal {...modalConfig} />
-      {/* 隱藏的檔案上傳 Input */}
       <input 
         type="file" 
         ref={fileInputRef} 
@@ -1110,12 +1129,10 @@ export default function App() {
                       className={`min-h-[160px] flex flex-col justify-between p-4 rounded-2xl border-b-8 transition-all shadow-md relative group
                         ${isSoldOut ? 'bg-gray-100 border-gray-200 text-gray-400/50 cursor-not-allowed' : `${getCategoryColor(product.category)} active:scale-95 hover:shadow-xl hover:-translate-y-1`}`}
                     >
-                      {/* 售完時的標籤，不遮擋文字 */}
                       {isSoldOut && <div className="absolute top-2 right-2 bg-red-600 text-white text-sm font-black px-3 py-1 rounded-full shadow-md z-10 animate-pulse">已售完</div>}
                       
                       <div className="w-full flex justify-between items-start mb-2">
                         <span className={`text-lg font-black px-2 py-1 rounded-lg ${isSoldOut ? 'bg-gray-200 text-gray-400' : 'bg-white/60 text-gray-800'}`}>{product.category}</span>
-                        {/* 庫存顯示 - 改為文字標籤 */}
                         {!isSoldOut && <span className={`text-lg font-bold px-2 py-1 rounded-lg flex items-center gap-1 ${product.stock < 10 ? 'bg-red-100 text-red-700' : 'bg-white/60 text-gray-700'}`}>
                           剩餘 {product.stock}
                         </span>}
@@ -1137,11 +1154,23 @@ export default function App() {
               </div>
             </div>
 
-            <div className="w-[450px] flex-none bg-white flex flex-col border-l-2 border-gray-300 shadow-2xl z-20">
+            <div className="w-full md:w-1/3 min-w-[320px] max-w-[450px] flex-none bg-white flex flex-col border-l-2 border-gray-300 shadow-2xl z-20">
               <div className="p-4 bg-slate-800 text-white">
-                <form onSubmit={handleBarcodeSubmit} className="relative">
-                  <QrCode className="absolute left-3 top-3.5 text-gray-400" size={24} />
-                  <input ref={barcodeInputRef} type="text" value={barcodeInput} onChange={handleBarcodeInput} placeholder="掃描條碼 (Focus)" className="w-full bg-slate-700 border-2 border-slate-600 rounded-xl pl-12 pr-4 py-3 text-xl text-white placeholder-gray-400 focus:ring-4 focus:ring-blue-500 focus:outline-none font-bold" autoFocus />
+                <form onSubmit={handleBarcodeSubmit} className="relative flex gap-2">
+                  <div className="relative flex-1">
+                    <QrCode className="absolute left-3 top-3.5 text-gray-400" size={24} />
+                    <input 
+                      ref={barcodeInputRef} 
+                      type="text" 
+                      value={barcodeInput} 
+                      onChange={handleBarcodeInput} // 改回正確的 onChange handler
+                      placeholder="掃描條碼 (Focus)" 
+                      className="w-full bg-slate-700 border-2 border-slate-600 rounded-xl pl-12 pr-4 py-3 text-xl text-white placeholder-gray-400 focus:ring-4 focus:ring-blue-500 focus:outline-none font-bold" 
+                      autoFocus 
+                      inputMode="none" // 預設不顯示鍵盤
+                    />
+                  </div>
+                  {/* 主畫面不需要鍵盤切換，因為主要是掃描槍用 */}
                 </form>
               </div>
 
