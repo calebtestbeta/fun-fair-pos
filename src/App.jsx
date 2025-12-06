@@ -30,8 +30,10 @@ import {
   Delete,
   FileDown,
   Keyboard,
-  ScanLine, // 新增圖示
-  CheckSquare // 新增圖示
+  ScanLine, 
+  CheckSquare,
+  ArchiveRestore,
+  FolderOpen // 新增圖示
 } from 'lucide-react';
 
 // --- MOCK DATA: 預設商品清單 ---
@@ -66,7 +68,6 @@ const INITIAL_PRODUCTS = [
   { id: 407, name: "紀念徽章", price: 30, category: "其他", barcode: "407", stock: 50 },
 ];
 
-// 定義支援的條碼格式
 const BARCODE_FORMATS = [
   { id: 'CODE39', name: 'Code 39', desc: '園遊會券/識別證常用 (支援英文+數字)', color: 'bg-blue-100 text-blue-800 border-blue-300' },
   { id: 'EAN13', name: 'EAN-13', desc: '一般零售商品 (13位數字)', color: 'bg-green-100 text-green-800 border-green-300' },
@@ -77,7 +78,8 @@ const BARCODE_FORMATS = [
 const STORAGE_KEYS = {
   PRODUCTS: 'pos_products_v1',
   TRANSACTIONS: 'pos_transactions_v1',
-  SETTINGS: 'pos_settings_v1' // 新增設定存檔
+  SETTINGS: 'pos_settings_v1',
+  IMPORTED_SNAPSHOT: 'pos_imported_snapshot_v1'
 };
 
 const EMPTY_ARRAY = [];
@@ -157,7 +159,20 @@ const Numpad = ({ onInput, onDelete, className = "" }) => {
 };
 
 // --- Modal Component ---
-const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMPTY_ARRAY, paymentInfo = null, editItems = null, allProducts = [], autoCloseDelay = null }) => {
+const Modal = ({ 
+  isOpen, 
+  type, 
+  title, 
+  message, 
+  onConfirm, 
+  onCancel, 
+  inputs = EMPTY_ARRAY, 
+  paymentInfo = null, 
+  editItems = null, 
+  allProducts = [], 
+  autoCloseDelay = null,
+  onExportAction = null // 新增：專門給匯出選單用的 callback
+}) => {
   const [inputValues, setInputValues] = useState({});
   const [receivedAmount, setReceivedAmount] = useState('');
   const [currentEditItems, setCurrentEditItems] = useState([]);
@@ -199,17 +214,11 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
 
   const handleNumpadInput = (value) => {
     const valStr = String(value);
-
     if (activeInput === 'received' && type === 'payment') {
       setReceivedAmount(prev => (prev + valStr).slice(0, 8));
-    }
-    else if (activeInput && type === 'input') {
-      setInputValues(prev => ({
-        ...prev,
-        [activeInput]: (prev[activeInput] + valStr)
-      }));
-    }
-    else if (activeInput && activeInput.startsWith('edit-') && type === 'edit-transaction') {
+    } else if (activeInput && type === 'input') {
+      setInputValues(prev => ({ ...prev, [activeInput]: (prev[activeInput] + valStr) }));
+    } else if (activeInput && activeInput.startsWith('edit-') && type === 'edit-transaction') {
       const [_, idxStr, field] = activeInput.split('-');
       const idx = parseInt(idxStr);
       if (field === 'price') {
@@ -225,14 +234,9 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
   const handleNumpadDelete = () => {
     if (activeInput === 'received' && type === 'payment') {
       setReceivedAmount(prev => prev.slice(0, -1));
-    }
-    else if (activeInput && type === 'input') {
-      setInputValues(prev => ({
-        ...prev,
-        [activeInput]: String(prev[activeInput]).slice(0, -1)
-      }));
-    }
-    else if (activeInput && activeInput.startsWith('edit-') && type === 'edit-transaction') {
+    } else if (activeInput && type === 'input') {
+      setInputValues(prev => ({ ...prev, [activeInput]: String(prev[activeInput]).slice(0, -1) }));
+    } else if (activeInput && activeInput.startsWith('edit-') && type === 'edit-transaction') {
       const [_, idxStr, field] = activeInput.split('-');
       const idx = parseInt(idxStr);
       if (field === 'price') {
@@ -265,10 +269,8 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
     if (!selectedProductId) return;
     const productToAdd = allProducts.find(p => p.id === parseInt(selectedProductId));
     if (!productToAdd) return;
-
     const newItems = [...currentEditItems];
     const existingIndex = newItems.findIndex(i => i.id === productToAdd.id);
-
     if (existingIndex >= 0) {
       newItems[existingIndex].qty += 1;
     } else {
@@ -303,25 +305,29 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 transition-opacity">
-      <div className={`bg-white rounded-3xl shadow-2xl w-full animate-[fade-in_0.2s_ease-out] border-2 border-gray-200 overflow-hidden flex flex-col max-h-[95vh] ${showNumpad ? 'max-w-5xl' : 'max-w-lg'}`}>
+      <div className={`bg-white rounded-3xl shadow-2xl w-full animate-[fade-in_0.2s_ease-out] border-2 border-gray-200 overflow-hidden flex flex-col max-h-[95vh] ${showNumpad ? 'max-w-5xl' : 'max-w-lg'} ${type === 'export-menu' ? 'max-w-2xl' : ''}`}>
         
+        {/* Header */}
         <div className={`p-6 flex items-center gap-4 ${
           type === 'danger' ? 'bg-red-100' : 
           type === 'success' ? 'bg-green-100' : 
           type === 'payment' ? 'bg-emerald-700 text-white' : 
-          type === 'edit-transaction' ? 'bg-orange-100' : 'bg-blue-100'
+          type === 'edit-transaction' ? 'bg-orange-100' : 
+          type === 'export-menu' ? 'bg-slate-800 text-white' : 'bg-blue-100'
         }`}>
           {type === 'danger' && <AlertTriangle className="text-red-600" size={40} />}
           {type === 'success' && <CheckCircle className="text-green-600" size={40} />}
           {type === 'payment' && <Calculator className="text-white" size={40} />}
           {type === 'edit-transaction' && <Edit3 className="text-orange-600" size={40} />}
+          {type === 'export-menu' && <FolderOpen className="text-white" size={40} />}
           {(type === 'info' || type === 'input') && <AlertCircle className="text-blue-600" size={40} />}
           
           <h3 className={`font-black text-3xl ${
             type === 'danger' ? 'text-red-900' : 
             type === 'success' ? 'text-green-900' : 
             type === 'payment' ? 'text-white' : 
-            type === 'edit-transaction' ? 'text-orange-900' : 'text-blue-900'
+            type === 'edit-transaction' ? 'text-orange-900' : 
+            type === 'export-menu' ? 'text-white' : 'text-blue-900'
           }`}>{title}</h3>
         </div>
         
@@ -329,6 +335,58 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
           <div className="flex-1 p-8 overflow-y-auto">
             {message && <p className="text-gray-800 text-xl font-medium mb-6 leading-relaxed whitespace-pre-line">{message}</p>}
             
+            {/* Export Menu 介面 */}
+            {type === 'export-menu' && (
+              <div className="flex flex-col gap-8">
+                {/* 今日資料區 */}
+                <div>
+                  <h4 className="text-xl font-black text-green-700 mb-4 flex items-center gap-2 border-b-2 border-green-100 pb-2">
+                    <CheckCircle size={24} /> 今日結算資料 (Today)
+                  </h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <button 
+                      onClick={() => onExportAction('orders', 'today')} 
+                      className="flex flex-col items-center justify-center p-6 bg-green-50 border-2 border-green-200 hover:bg-green-100 rounded-2xl transition-all active:scale-95 group"
+                    >
+                      <Download size={32} className="text-green-600 mb-2 group-hover:scale-110 transition-transform" />
+                      <span className="font-bold text-lg text-green-800">匯出訂單明細</span>
+                    </button>
+                    <button 
+                      onClick={() => onExportAction('products', 'today')}
+                      className="flex flex-col items-center justify-center p-6 bg-green-50 border-2 border-green-200 hover:bg-green-100 rounded-2xl transition-all active:scale-95 group"
+                    >
+                      <FileText size={32} className="text-green-600 mb-2 group-hover:scale-110 transition-transform" />
+                      <span className="font-bold text-lg text-green-800">匯出商品統計</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 完整歷史區 */}
+                <div>
+                  <h4 className="text-xl font-black text-slate-600 mb-4 flex items-center gap-2 border-b-2 border-slate-100 pb-2">
+                    <History size={24} /> 完整歷史紀錄 (All Time)
+                  </h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <button 
+                      onClick={() => onExportAction('orders', 'all')}
+                      className="flex flex-col items-center justify-center p-6 bg-slate-50 border-2 border-slate-200 hover:bg-slate-100 rounded-2xl transition-all active:scale-95 group"
+                    >
+                      <Download size={32} className="text-slate-500 mb-2 group-hover:scale-110 transition-transform" />
+                      <span className="font-bold text-lg text-slate-700">匯出所有訂單</span>
+                    </button>
+                    <button 
+                      onClick={() => onExportAction('products', 'all')}
+                      className="flex flex-col items-center justify-center p-6 bg-slate-50 border-2 border-slate-200 hover:bg-slate-100 rounded-2xl transition-all active:scale-95 group"
+                    >
+                      <FileText size={32} className="text-slate-500 mb-2 group-hover:scale-110 transition-transform" />
+                      <span className="font-bold text-lg text-slate-700">匯出所有統計</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 一般輸入框 */}
             {inputs.length > 0 && (
               <div className="space-y-6 mb-6">
                 {inputs.map((input) => (
@@ -365,6 +423,7 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
               </div>
             )}
 
+            {/* (省略中間的 edit-transaction 和 payment 區塊，保持原樣) */}
             {type === 'edit-transaction' && (
               <div className="space-y-6">
                 <div className="flex gap-4 items-end bg-orange-50 p-4 rounded-xl border border-orange-200">
@@ -447,7 +506,7 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
                 </div>
                 
                 <div>
-                  <label className="block text-xl font-bold text-gray-800 mb-3">實收金額 (可不填)</label>
+                  <label className="block text-xl font-bold text-gray-800 mb-3">實收金額</label>
                   <div className="relative flex gap-2">
                     <div className="relative flex-1">
                         <span className="absolute left-5 top-4 text-gray-400 text-3xl font-bold">$</span>
@@ -463,6 +522,12 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
                         autoFocus
                         />
                     </div>
+                    <div className="flex gap-3 mt-4">
+                    {[100, 500, 1000].map(amt => (
+                      <button key={amt} onClick={() => setReceivedAmount(amt.toString())} className="flex-1 py-4 text-xl bg-gray-200 hover:bg-gray-300 rounded-xl text-gray-800 font-bold transition-colors border-2 border-gray-300">${amt}</button>
+                    ))}
+                    <button onClick={() => setReceivedAmount(paymentInfo.total.toString())} className="flex-1 py-4 text-xl bg-emerald-100 text-emerald-800 hover:bg-emerald-200 rounded-xl font-bold transition-colors border-2 border-emerald-300">剛好</button>
+                  </div>
                     <button
                         onClick={() => setUseNativeKeyboard(!useNativeKeyboard)}
                         className={`px-4 rounded-2xl border-4 transition-colors ${useNativeKeyboard ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-gray-100 text-gray-500 border-gray-300'}`}
@@ -471,12 +536,7 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
                         <Keyboard size={32} />
                     </button>
                   </div>
-                  <div className="flex gap-3 mt-4">
-                    {[100, 500, 1000].map(amt => (
-                      <button key={amt} onClick={() => setReceivedAmount(amt.toString())} className="flex-1 py-4 text-xl bg-gray-200 hover:bg-gray-300 rounded-xl text-gray-800 font-bold transition-colors border-2 border-gray-300">${amt}</button>
-                    ))}
-                    <button onClick={() => setReceivedAmount(paymentInfo.total.toString())} className="flex-1 py-4 text-xl bg-emerald-100 text-emerald-800 hover:bg-emerald-200 rounded-xl font-bold transition-colors border-2 border-emerald-300">剛好</button>
-                  </div>
+                  
                 </div>
 
                 <div className={`flex justify-between items-center p-6 rounded-2xl border-2 transition-colors ${changeAmount < 0 ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-200 text-emerald-900'}`}>
@@ -486,19 +546,22 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
               </div>
             )}
 
+            {/* Buttons */}
             <div className="flex gap-4 justify-end mt-8 pt-6 border-t-2 border-gray-100">
               {onCancel && <button onClick={onCancel} className="px-8 py-4 rounded-xl text-xl text-gray-600 hover:bg-gray-200 font-bold transition-colors bg-gray-100 border-2 border-gray-200">取消</button>}
-              <button 
-                onClick={handleConfirm}
-                disabled={type === 'payment' && changeAmount < 0}
-                className={`px-10 py-4 rounded-xl text-white text-2xl font-bold shadow-xl active:scale-95 transition-all flex items-center gap-3
-                  ${type === 'danger' ? 'bg-red-600 hover:bg-red-700 shadow-red-200' : 
-                    type === 'payment' ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed' : 
-                    type === 'edit-transaction' ? 'bg-orange-500 hover:bg-orange-600 shadow-orange-200' :
-                    'bg-blue-600 hover:bg-blue-700 shadow-blue-200'}`}
-              >
-                {type === 'payment' ? <><CheckCircle size={32}/> 確認結帳</> : '確定'}
-              </button>
+              {type !== 'export-menu' && (
+                <button 
+                  onClick={handleConfirm}
+                  disabled={type === 'payment' && changeAmount < 0}
+                  className={`px-10 py-4 rounded-xl text-white text-2xl font-bold shadow-xl active:scale-95 transition-all flex items-center gap-3
+                    ${type === 'danger' ? 'bg-red-600 hover:bg-red-700 shadow-red-200' : 
+                      type === 'payment' ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed' : 
+                      type === 'edit-transaction' ? 'bg-orange-500 hover:bg-orange-600 shadow-orange-200' :
+                      'bg-blue-600 hover:bg-blue-700 shadow-blue-200'}`}
+                >
+                  {type === 'payment' ? <><CheckCircle size={32}/> 確認結帳</> : '確定'}
+                </button>
+              )}
             </div>
           </div>
 
@@ -522,7 +585,7 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
 
 // --- 主程式元件 ---
 export default function App() {
-  const [currentView, setCurrentView] = useState('pos'); // pos, history, inventory, settings
+  const [currentView, setCurrentView] = useState('pos');
   
   // STATE: 讀取 LocalStorage 或使用預設值
   const [products, setProducts] = useState(() => {
@@ -533,11 +596,13 @@ export default function App() {
     const saved = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
     return saved ? JSON.parse(saved) : [];
   });
-  
-  // 新增 Settings State: 預設 code39
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
     return saved ? JSON.parse(saved) : { barcodeFormat: 'CODE39' };
+  });
+  const [importedSnapshot, setImportedSnapshot] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.IMPORTED_SNAPSHOT);
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [cart, setCart] = useState([]);
@@ -556,28 +621,38 @@ export default function App() {
     return ["全部", ...Array.from(cats)];
   }, [products]);
 
-  // 取得目前設定的條碼格式資訊
   const currentFormat = BARCODE_FORMATS.find(f => f.id === settings.barcodeFormat) || BARCODE_FORMATS[0];
 
   // EFFECT: 自動存檔
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(products));
   }, [products]);
-
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
   }, [transactions]);
-
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
   }, [settings]);
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.IMPORTED_SNAPSHOT, JSON.stringify(importedSnapshot));
+  }, [importedSnapshot]);
 
   // --- 計算邏輯 ---
   const cartTotal = useMemo(() => {
     return cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
   }, [cart]);
 
-  // --- 音效播放 ---
+  const todayTotal = useMemo(() => {
+    const todayStr = new Date().toDateString(); 
+    return transactions.reduce((acc, t) => {
+      const transactionDate = new Date(t.id).toDateString();
+      if (transactionDate === todayStr) {
+        return acc + t.total;
+      }
+      return acc;
+    }, 0);
+  }, [transactions]);
+
   const playSound = (type) => {
     setLastSound(type);
     playSystemSound(type);
@@ -589,7 +664,7 @@ export default function App() {
     setTimeout(() => barcodeInputRef.current?.focus(), 100);
   };
 
-  // --- 系統功能 ---
+  // ... (handleResetSystem, handleRestoreStock, handleDownloadTemplate, handleImportCSV same as before) ...
   const handleResetSystem = () => {
     setModalConfig({
       isOpen: true,
@@ -599,9 +674,11 @@ export default function App() {
       onCancel: closeModal,
       onConfirm: () => {
         setProducts(INITIAL_PRODUCTS);
+        setImportedSnapshot([]);
         setTransactions([]);
         setCart([]);
         localStorage.removeItem(STORAGE_KEYS.PRODUCTS);
+        localStorage.removeItem(STORAGE_KEYS.IMPORTED_SNAPSHOT);
         localStorage.removeItem(STORAGE_KEYS.TRANSACTIONS);
         playSound('clear');
         closeModal();
@@ -609,7 +686,31 @@ export default function App() {
     });
   };
 
-  // --- 匯入/匯出範例 CSV ---
+  const handleRestoreStock = () => {
+    if (importedSnapshot.length === 0) {
+      setModalConfig({
+        isOpen: true,
+        type: 'info',
+        title: '無還原點',
+        message: '尚未匯入過 CSV，無法還原庫存。',
+        onConfirm: closeModal
+      });
+      return;
+    }
+    setModalConfig({
+      isOpen: true,
+      type: 'danger',
+      title: '恢復每日庫存', 
+      message: `確定要將所有商品庫存重置為「每日預設值」嗎？\n(即回到最後一次匯入 CSV 時的數量)\n\n注意：目前的庫存變更將會被覆蓋。`,
+      onCancel: closeModal,
+      onConfirm: () => {
+        setProducts(JSON.parse(JSON.stringify(importedSnapshot))); 
+        playSound('cash');
+        closeModal();
+      }
+    });
+  };
+
   const handleDownloadTemplate = () => {
     const csvContent = "\uFEFF商品名稱,價格,分類,條碼,庫存\n範例商品,100,熱食,123456,50";
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -625,37 +726,25 @@ export default function App() {
   const handleImportCSV = (event) => {
     const file = event.target.files[0];
     if (!file) return;
-
     const reader = new FileReader();
-    // 修改：改用 readAsArrayBuffer 以便進行編碼偵測
     reader.onload = (e) => {
       try {
         const buffer = e.target.result;
         let text = '';
-        
-        // 1. 嘗試使用 UTF-8 解碼 (設定 fatal: true 以便在解碼失敗時拋出錯誤)
         const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
         try {
           text = utf8Decoder.decode(buffer);
         } catch (error) {
-          // 2. 如果 UTF-8 失敗，假設是 Big5 (Windows Excel 預設)
           console.log("UTF-8 decoding failed, trying Big5...");
           const big5Decoder = new TextDecoder('big5');
           text = big5Decoder.decode(buffer);
         }
-
-        // 移除可能存在的 BOM (Byte Order Mark)
         if (text.charCodeAt(0) === 0xFEFF) {
           text = text.slice(1);
         }
-
         const rows = text.split(/\r\n|\n/).filter(row => row.trim() !== '');
         const dataRows = rows.slice(1);
-        
-        if (dataRows.length === 0) {
-          throw new Error("CSV 檔案內容為空");
-        }
-
+        if (dataRows.length === 0) throw new Error("CSV 檔案內容為空");
         const newProducts = dataRows.map((row, index) => {
           const cols = row.split(',');
           const name = cols[0]?.trim() || `未命名商品 ${index+1}`;
@@ -663,50 +752,30 @@ export default function App() {
           const category = cols[2]?.trim() || "其他";
           const barcode = cols[3]?.trim() || "";
           const stock = parseInt(cols[4]) || 0;
-
-          return {
-            id: Date.now() + index,
-            name,
-            price,
-            category,
-            barcode,
-            stock,
-            isCustom: false
-          };
+          return { id: Date.now() + index, name, price, category, barcode, stock, isCustom: false };
         });
-
         setModalConfig({
           isOpen: true,
           type: 'danger',
           title: '確認匯入商品',
           message: `即將匯入 ${newProducts.length} 筆商品資料。\n注意：這將會「完全覆蓋」目前的商品清單與庫存。\n確定要繼續嗎？`,
-          onCancel: () => {
-            closeModal();
-            event.target.value = '';
-          },
+          onCancel: () => { closeModal(); event.target.value = ''; },
           onConfirm: () => {
             setProducts(newProducts);
+            setImportedSnapshot(newProducts);
             setSelectedCategory("全部"); 
             playSound('cash');
             closeModal();
             event.target.value = '';
           }
         });
-
       } catch (error) {
         console.error(error);
         playSound('error');
-        setModalConfig({
-          isOpen: true,
-          type: 'info',
-          title: '匯入失敗',
-          message: '無法解析 CSV 檔案，請確認格式是否正確。\n建議使用 UTF-8 或 Big5 編碼格式。',
-          onConfirm: closeModal
-        });
+        setModalConfig({ isOpen: true, type: 'info', title: '匯入失敗', message: '無法解析 CSV 檔案，請確認格式是否正確。\n建議使用 UTF-8 或 Big5 編碼格式。', onConfirm: closeModal });
         event.target.value = '';
       }
     };
-    // 使用 ArrayBuffer 讀取原始位元組
     reader.readAsArrayBuffer(file);
   };
 
@@ -714,34 +783,24 @@ export default function App() {
     fileInputRef.current.click();
   };
 
-  // --- 核心功能 ---
-
+  // ... (addToCart, updateQty, removeFromCart, handleCustomProduct, handleEditItem, clearCart, handleRestock, handleCheckout, handleEditTransaction, voidTransaction, handleBarcodeInput, handleBarcodeSubmit same as before) ...
   const addToCart = (product, qty = 1) => {
     const currentStock = product.stock;
     const existingInCart = cart.find(i => i.id === product.id);
     const qtyInCart = existingInCart ? existingInCart.qty : 0;
     const finalQty = qty; 
-    
     if (product.isCustom || (currentStock - qtyInCart - finalQty >= 0)) {
       setCart(prev => {
         const existing = prev.find(item => item.id === product.id);
         if (existing) {
-          return prev.map(item => 
-            item.id === product.id ? { ...item, qty: item.qty + finalQty } : item
-          );
+          return prev.map(item => item.id === product.id ? { ...item, qty: item.qty + finalQty } : item);
         }
         return [...prev, { ...product, qty: finalQty }];
       });
       playSound('beep');
     } else {
       playSound('error');
-      setModalConfig({
-        isOpen: true,
-        type: 'info',
-        title: '庫存不足',
-        message: `「${product.name}」剩餘庫存為 ${currentStock}，無法再加入 ${finalQty} 個。`,
-        onConfirm: closeModal
-      });
+      setModalConfig({ isOpen: true, type: 'info', title: '庫存不足', message: `「${product.name}」剩餘庫存為 ${currentStock}，無法再加入 ${finalQty} 個。`, onConfirm: closeModal });
     }
   };
 
@@ -750,10 +809,7 @@ export default function App() {
       const item = cart.find(i => i.id === id);
       const product = products.find(p => p.id === id);
       if (item && product && !product.isCustom) {
-         if (product.stock <= item.qty) {
-           playSound('error');
-           return;
-         }
+         if (product.stock <= item.qty) { playSound('error'); return; }
       }
     }
     setCart(prev => prev.map(item => {
@@ -765,17 +821,11 @@ export default function App() {
     }).filter(item => item.qty > 0));
   };
 
-  const removeFromCart = (id) => {
-    setCart(prev => prev.filter(item => item.id !== id));
-  };
+  const removeFromCart = (id) => setCart(prev => prev.filter(item => item.id !== id));
 
-  // --- Modal 操作 ---
   const handleCustomProduct = () => {
     setModalConfig({
-      isOpen: true,
-      type: 'input',
-      title: '新增自訂商品',
-      message: '請輸入商品名稱與金額',
+      isOpen: true, type: 'input', title: '新增自訂商品', message: '請輸入商品名稱與金額',
       inputs: [
         { name: 'name', label: '商品名稱', defaultValue: '其他項目', autoFocus: true },
         { name: 'price', label: '金額', type: 'number', defaultValue: '' }
@@ -783,14 +833,7 @@ export default function App() {
       onCancel: closeModal,
       onConfirm: (values) => {
         if (!values.name || !values.price) return;
-        addToCart({
-          id: `custom-${Date.now()}`,
-          name: values.name,
-          price: parseInt(values.price),
-          category: "自訂",
-          isCustom: true,
-          stock: 9999
-        });
+        addToCart({ id: `custom-${Date.now()}`, name: values.name, price: parseInt(values.price), category: "自訂", isCustom: true, stock: 9999 });
         closeModal();
       }
     });
@@ -798,10 +841,7 @@ export default function App() {
 
   const handleEditItem = (item) => {
     setModalConfig({
-      isOpen: true,
-      type: 'input',
-      title: '修改商品價格',
-      message: '注意：您僅能修改此商品的單價 (清倉改價用)，名稱不可變更。',
+      isOpen: true, type: 'input', title: '修改商品價格', message: '注意：您僅能修改此商品的單價 (清倉改價用)，名稱不可變更。',
       inputs: [
         { name: 'name', label: '商品名稱 (不可修改)', defaultValue: item.name, readOnly: true },
         { name: 'price', label: '單價', type: 'number', defaultValue: item.price, autoFocus: true }
@@ -809,11 +849,7 @@ export default function App() {
       onCancel: closeModal,
       onConfirm: (values) => {
         if (!values.price) return;
-        setCart(prev => prev.map(cartItem => 
-          cartItem.id === item.id 
-            ? { ...cartItem, price: parseInt(values.price) } 
-            : cartItem
-        ));
+        setCart(prev => prev.map(cartItem => cartItem.id === item.id ? { ...cartItem, price: parseInt(values.price) } : cartItem));
         closeModal();
       }
     });
@@ -822,26 +858,15 @@ export default function App() {
   const clearCart = () => {
     if (cart.length > 0) {
       setModalConfig({
-        isOpen: true,
-        type: 'danger',
-        title: '清空購物車',
-        message: '確定要移除購物車內所有商品嗎？',
-        onCancel: closeModal,
-        onConfirm: () => {
-          setCart([]);
-          playSound('clear');
-          closeModal();
-        }
+        isOpen: true, type: 'danger', title: '清空購物車', message: '確定要移除購物車內所有商品嗎？', onCancel: closeModal,
+        onConfirm: () => { setCart([]); playSound('clear'); closeModal(); }
       });
     }
   };
 
   const handleRestock = (product) => {
     setModalConfig({
-      isOpen: true,
-      type: 'input',
-      title: `調整庫存: ${product.name}`,
-      message: `目前庫存: ${product.stock}。請輸入新的庫存數量。`,
+      isOpen: true, type: 'input', title: `調整庫存: ${product.name}`, message: `目前庫存: ${product.stock}。請輸入新的庫存數量。`,
       inputs: [
         { name: 'stock', label: '新庫存數量', type: 'number', defaultValue: product.stock.toString(), autoFocus: true }
       ],
@@ -856,216 +881,76 @@ export default function App() {
   };
 
   const handleCheckout = () => {
-    if (cart.length === 0) {
-      playSound('error');
-      return;
-    }
-
+    if (cart.length === 0) { playSound('error'); return; }
     setModalConfig({
-      isOpen: true,
-      type: 'payment',
-      title: '結帳確認',
-      paymentInfo: { total: cartTotal },
-      onCancel: closeModal,
+      isOpen: true, type: 'payment', title: '結帳確認', paymentInfo: { total: cartTotal }, onCancel: closeModal,
       onConfirm: (paymentResult) => {
         const newTransaction = {
-          id: Date.now(),
-          time: new Date().toLocaleString(),
-          items: [...cart],
-          total: cartTotal,
-          received: paymentResult.received,
-          change: paymentResult.change,
-          status: 'completed'
+          id: Date.now(), time: new Date().toLocaleString(), items: [...cart], total: cartTotal, received: paymentResult.received, change: paymentResult.change, status: 'completed'
         };
         setTransactions(prev => [newTransaction, ...prev]);
-
-        setProducts(prevProducts => {
-          return prevProducts.map(product => {
-            const cartItem = cart.find(c => c.id === product.id);
-            if (cartItem && !product.isCustom) {
-              return { ...product, stock: Math.max(0, product.stock - cartItem.qty) };
-            }
-            return product;
-          });
-        });
-
-        setCart([]);
-        playSound('cash');
-        closeModal();
+        setProducts(prevProducts => prevProducts.map(product => {
+          const cartItem = cart.find(c => c.id === product.id);
+          if (cartItem && !product.isCustom) {
+            return { ...product, stock: Math.max(0, product.stock - cartItem.qty) };
+          }
+          return product;
+        }));
+        setCart([]); playSound('cash'); closeModal();
       }
     });
   };
 
-  const handleExportCSV = () => {
-    if (transactions.length === 0) {
-      setModalConfig({ isOpen: true, type: 'info', title: '無資料', message: '目前沒有銷售紀錄可供匯出。', onConfirm: closeModal });
-      return;
-    }
-
-    const escapeCSV = (str) => {
-      if (typeof str !== 'string') return `"${str}"`;
-      return `"${str.replace(/"/g, '""')}"`;
-    }
-
-    const headers = ["交易ID", "時間", "商品詳情", "總金額", "實收", "找零", "狀態"];
-    const rows = transactions.map(t => [
-      escapeCSV(t.id),
-      escapeCSV(t.time),
-      escapeCSV(t.items.map(i => `${i.name} x${i.qty}`).join('; ')),
-      t.total,
-      t.received || '-',
-      t.change || '-',
-      t.status
-    ]);
-
-    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", `POS_Orders_${new Date().toISOString().slice(0,10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    playSound('cash');
-  };
-
-  const handleExportProductCSV = () => {
-    if (transactions.length === 0) {
-      setModalConfig({ isOpen: true, type: 'info', title: '無資料', message: '目前沒有銷售紀錄可供匯出。', onConfirm: closeModal });
-      return;
-    }
-
-    const productStats = {};
-
-    transactions.forEach(t => {
-      t.items.forEach(item => {
-        if (!productStats[item.name]) {
-          productStats[item.name] = { qty: 0, revenue: 0, category: item.category || "未知" };
-        }
-        productStats[item.name].qty += item.qty;
-        productStats[item.name].revenue += (item.price * item.qty);
-      });
-    });
-
-    const escapeCSV = (str) => `"${String(str).replace(/"/g, '""')}"`;
-
-    const headers = ["商品名稱", "分類", "銷售數量", "銷售總額"];
-    const rows = Object.keys(productStats).map(name => [
-      escapeCSV(name),
-      escapeCSV(productStats[name].category),
-      productStats[name].qty,
-      productStats[name].revenue
-    ]);
-
-    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", `POS_Products_${new Date().toISOString().slice(0,10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    playSound('cash');
-  };
-
   const handleEditTransaction = (transaction) => {
     setModalConfig({
-      isOpen: true,
-      type: 'edit-transaction',
-      title: '修改訂單內容',
-      message: '您可以修改此筆訂單的商品內容與數量。',
-      editItems: transaction.items, 
-      allProducts: products, 
-      onCancel: closeModal,
+      isOpen: true, type: 'edit-transaction', title: '修改訂單內容', message: '您可以修改此筆訂單的商品內容與數量。',
+      editItems: transaction.items, allProducts: products, onCancel: closeModal,
       onConfirm: (newItems) => {
         if (newItems.length === 0) {
-          if(confirm("商品已全部清空，是否直接刪除此筆訂單？")) {
-            voidTransaction(transaction.id);
-          }
+          if(confirm("商品已全部清空，是否直接刪除此筆訂單？")) voidTransaction(transaction.id);
           return;
         }
-
         const newTotal = newItems.reduce((sum, item) => sum + (item.price * item.qty), 0);
-
-        setTransactions(prev => prev.map(t => 
-          t.id === transaction.id 
-            ? { ...t, items: newItems, total: newTotal, isModified: true, lastModified: new Date().toLocaleString() } 
-            : t
-        ));
-
-        playSound('cash'); 
-        closeModal();
+        setTransactions(prev => prev.map(t => t.id === transaction.id ? { ...t, items: newItems, total: newTotal, isModified: true, lastModified: new Date().toLocaleString() } : t));
+        playSound('cash'); closeModal();
       }
     });
   };
 
   const voidTransaction = (id) => {
     setModalConfig({
-      isOpen: true,
-      type: 'danger',
-      title: '刪除訂單',
-      message: '確定要刪除這筆紀錄嗎？這將會扣除當日營收且無法復原。(注意：庫存不會自動補回，需手動調整)',
+      isOpen: true, type: 'danger', title: '刪除訂單', message: '確定要刪除這筆紀錄嗎？這將會扣除當日營收且無法復原。(注意：庫存不會自動補回，需手動調整)',
       onCancel: closeModal,
-      onConfirm: () => {
-        setTransactions(prev => prev.filter(t => t.id !== id));
-        playSound('clear');
-        closeModal();
-      }
+      onConfirm: () => { setTransactions(prev => prev.filter(t => t.id !== id)); playSound('clear'); closeModal(); }
     });
   };
 
   const handleBarcodeInput = (e) => {
     const value = e.target.value;
-    const normalizedValue = value.replace(/[\uff01-\uff5e]/g, function(ch) {
-       return String.fromCharCode(ch.charCodeAt(0) - 0xfee0);
-    });
-    
+    const normalizedValue = value.replace(/[\uff01-\uff5e]/g, function(ch) { return String.fromCharCode(ch.charCodeAt(0) - 0xfee0); });
     setBarcodeInput(normalizedValue);
-
     const matchedProduct = products.find(p => p.barcode === normalizedValue.trim());
     if (matchedProduct) {
       const now = Date.now();
-      if (now - lastScanTimeRef.current < 500) {
-        console.log("Scan ignored (debounce)");
-        setBarcodeInput("");
-        return;
-      }
+      if (now - lastScanTimeRef.current < 500) { console.log("Scan ignored (debounce)"); setBarcodeInput(""); return; }
       lastScanTimeRef.current = now;
-
-      addToCart(matchedProduct);
-      setBarcodeInput(""); 
+      addToCart(matchedProduct); setBarcodeInput("");
     }
   };
 
   const handleBarcodeSubmit = (e) => {
     e.preventDefault();
     const code = barcodeInput.trim();
-    if (!code) return; 
-
+    if (!code) return;
     const product = products.find(p => p.barcode === code);
-    
     if (product) {
        const now = Date.now();
-       if (now - lastScanTimeRef.current > 500) {
-          lastScanTimeRef.current = now;
-          addToCart(product);
-       }
+       if (now - lastScanTimeRef.current > 500) { lastScanTimeRef.current = now; addToCart(product); }
        setBarcodeInput("");
     } else {
        playSound('error');
-       setModalConfig({
-        isOpen: true,
-        type: 'danger', 
-        title: '查無此商品',
-        message: `系統找不到條碼為「${code}」的商品。\n視窗將於 2.5 秒後自動關閉，請準備重新掃描。`,
-        onConfirm: closeModal, 
-        autoCloseDelay: 2500 
-       });
-       setBarcodeInput(""); 
+       setModalConfig({ isOpen: true, type: 'danger', title: '查無此商品', message: `系統找不到條碼為「${code}」的商品。\n視窗將於 2.5 秒後自動關閉，請準備重新掃描。`, onConfirm: closeModal, autoCloseDelay: 2500 });
+       setBarcodeInput("");
     }
   };
 
@@ -1076,16 +961,103 @@ export default function App() {
         return;
       }
       if (document.activeElement.tagName === 'INPUT') return;
-
       switch(e.code) {
-        case 'Space':
-        case 'Enter': e.preventDefault(); handleCheckout(); break;
+        case 'Space': case 'Enter': e.preventDefault(); handleCheckout(); break;
         case 'Escape': e.preventDefault(); clearCart(); break;
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [cart, modalConfig]);
+
+  // --- 核心匯出邏輯 (Data Processing) ---
+  const exportData = (dataType, scope) => {
+    const todayStr = new Date().toDateString();
+    
+    // 1. 篩選資料範圍
+    const dataToExport = scope === 'today' 
+      ? transactions.filter(t => new Date(t.id).toDateString() === todayStr)
+      : transactions;
+
+    if (dataToExport.length === 0) {
+      setModalConfig({ 
+        isOpen: true, 
+        type: 'info', 
+        title: '無資料', 
+        message: `查無${scope === 'today' ? '今日' : '歷史'}銷售紀錄，無法匯出。`, 
+        onConfirm: closeModal 
+      });
+      return;
+    }
+
+    const scopeName = scope === 'today' ? `Today_${new Date().toISOString().slice(0,10)}` : 'All_History';
+    const escapeCSV = (str) => `"${String(str).replace(/"/g, '""')}"`;
+    let csvContent = "\uFEFF";
+    let fileName = "";
+
+    // 2. 根據類型產生 CSV 內容
+    if (dataType === 'orders') {
+      // 訂單明細
+      const headers = ["交易ID", "時間", "商品詳情", "總金額", "實收", "找零", "狀態"];
+      const rows = dataToExport.map(t => [
+        escapeCSV(t.id),
+        escapeCSV(t.time),
+        escapeCSV(t.items.map(i => `${i.name} x${i.qty}`).join('; ')),
+        t.total,
+        t.received || '-',
+        t.change || '-',
+        t.status
+      ]);
+      csvContent += [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+      fileName = `POS_Orders_${scopeName}.csv`;
+    } else {
+      // 商品統計
+      const productStats = {};
+      dataToExport.forEach(t => {
+        t.items.forEach(item => {
+          if (!productStats[item.name]) {
+            productStats[item.name] = { qty: 0, revenue: 0, category: item.category || "未知" };
+          }
+          productStats[item.name].qty += item.qty;
+          productStats[item.name].revenue += (item.price * item.qty);
+        });
+      });
+      const headers = ["商品名稱", "分類", "銷售數量", "銷售總額"];
+      const rows = Object.keys(productStats).map(name => [
+        escapeCSV(name),
+        escapeCSV(productStats[name].category),
+        productStats[name].qty,
+        productStats[name].revenue
+      ]);
+      csvContent += [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+      fileName = `POS_Products_${scopeName}.csv`;
+    }
+
+    // 3. 下載檔案
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", fileName);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    playSound('cash');
+    closeModal(); // 關閉選單
+  };
+
+  // 開啟匯出選單
+  const handleOpenExportMenu = () => {
+    setModalConfig({
+      isOpen: true,
+      type: 'export-menu',
+      title: '選擇匯出報表',
+      message: '請選擇您要匯出的資料範圍與類型。',
+      onCancel: closeModal,
+      onExportAction: exportData // 傳遞匯出函式
+    });
+  };
 
   const filteredProducts = products.filter(p => {
     const matchCat = selectedCategory === "全部" || p.category === selectedCategory;
@@ -1103,10 +1075,6 @@ export default function App() {
     }
   };
 
-  const MultiplierButton = ({ value }) => (
-    <button onClick={() => setMultiplier(value)} className={`flex-1 py-4 rounded-xl font-black transition-all text-xl border-2 shadow-sm ${multiplier === value ? 'bg-red-600 text-white shadow-md scale-105 border-red-700' : 'bg-white text-gray-800 border-gray-300 hover:bg-red-50 hover:border-red-200'}`}>x{value}</button>
-  );
-
   return (
     <div className="flex flex-col h-screen bg-gray-50 text-gray-900 font-sans overflow-hidden relative text-lg">
       <Modal {...modalConfig} />
@@ -1119,6 +1087,7 @@ export default function App() {
       />
 
       <header className="flex-none h-20 bg-slate-900 text-white flex items-center justify-between px-6 shadow-md z-10">
+        {/* Header Content */}
         <div className="flex items-center gap-3">
           <div className="bg-blue-600 p-2 rounded-xl"><Monitor size={28} className="text-white" /></div>
           <div className="flex flex-col">
@@ -1133,13 +1102,12 @@ export default function App() {
           <button onClick={() => setCurrentView('settings')} className={`flex items-center gap-3 px-6 py-3 rounded-lg transition-all font-bold text-xl ${currentView === 'settings' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:bg-slate-700 hover:text-white'}`}><Settings size={24} /><span>設定</span></button>
         </nav>
         <div className="flex items-center gap-4">
-           <button onClick={handleResetSystem} className="flex items-center gap-2 text-red-300 hover:text-white hover:bg-red-900/80 px-4 py-2 rounded-lg border border-red-800/50 transition-colors font-bold">
-             <RotateCcw size={20} /> 重置系統
-           </button>
+          <div className="flex items-center gap-1 text-green-400"><Save size={14} /><span className="text-xs">自動存檔開啟</span></div>
         </div>
       </header>
 
       <main className="flex-1 flex overflow-hidden">
+        {/* POS View */}
         {currentView === 'pos' && (
           <>
             <div className="flex-1 flex flex-col border-r-2 border-gray-200 bg-white">
@@ -1148,17 +1116,12 @@ export default function App() {
                   <Search className="absolute left-4 top-4 text-gray-500" size={24} />
                   <input type="text" placeholder="搜尋商品..." className="pl-12 pr-4 py-3 rounded-xl border-2 border-gray-300 focus:outline-none focus:ring-4 focus:ring-blue-500 w-64 shadow-sm text-xl font-bold" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
                 </div>
-                
                 <div className="h-10 w-0.5 bg-gray-300 mx-2"></div>
-                
-                {/* 顯示目前的條碼格式 */}
                 <div className={`px-4 py-2 rounded-lg border-2 text-sm font-bold flex items-center gap-2 ${currentFormat.color}`}>
                   <ScanLine size={18} />
                   {currentFormat.name}
                 </div>
-
                 <div className="h-10 w-0.5 bg-gray-300 mx-2"></div>
-                
                 <div className="flex gap-3">
                   {dynamicCategories.map(cat => (
                     <button key={cat} onClick={() => setSelectedCategory(cat)} className={`px-6 py-3 rounded-xl text-xl font-bold whitespace-nowrap transition-colors shadow-sm border-2 ${selectedCategory === cat ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-700 hover:bg-gray-200 border-gray-300'}`}>{cat}</button>
@@ -1171,7 +1134,6 @@ export default function App() {
                   <button onClick={handleCustomProduct} className="min-h-[160px] h-full flex flex-col items-center justify-center p-4 rounded-2xl border-4 border-dashed border-gray-300 bg-white text-gray-500 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-600 transition-all shadow-sm active:scale-95 group">
                     <Plus size={48} className="mb-2 opacity-50 group-hover:opacity-100" /><span className="font-black text-2xl">自訂金額</span>
                   </button>
-
                   {filteredProducts.map(product => {
                     const isSoldOut = product.stock <= 0;
                     return (
@@ -1183,49 +1145,28 @@ export default function App() {
                         ${isSoldOut ? 'bg-gray-100 border-gray-200 text-gray-400/50 cursor-not-allowed' : `${getCategoryColor(product.category)} active:scale-95 hover:shadow-xl hover:-translate-y-1`}`}
                     >
                       {isSoldOut && <div className="absolute top-2 right-2 bg-red-600 text-white text-sm font-black px-3 py-1 rounded-full shadow-md z-10 animate-pulse">已售完</div>}
-                      
                       <div className="w-full flex justify-between items-start mb-2">
                         <span className={`text-lg font-black px-2 py-1 rounded-lg ${isSoldOut ? 'bg-gray-200 text-gray-400' : 'bg-white/60 text-gray-800'}`}>{product.category}</span>
-                        {!isSoldOut && <span className={`text-lg font-bold px-2 py-1 rounded-lg flex items-center gap-1 ${product.stock < 10 ? 'bg-red-100 text-red-700' : 'bg-white/60 text-gray-700'}`}>
-                          剩餘 {product.stock}
-                        </span>}
+                        {!isSoldOut && <span className={`text-lg font-bold px-2 py-1 rounded-lg flex items-center gap-1 ${product.stock < 10 ? 'bg-red-100 text-red-700' : 'bg-white/60 text-gray-700'}`}>剩餘 {product.stock}</span>}
                       </div>
-                      
-                      <div className="text-center font-black text-3xl leading-tight mb-1 relative z-10 w-full truncate">
-                        {product.name}
-                      </div>
+                      <div className="text-center font-black text-3xl leading-tight mb-1 relative z-10 w-full truncate">{product.name}</div>
                       <div className="text-center font-black text-4xl opacity-90 mt-auto">${product.price}</div>
                     </button>
                   )})}
-                  
-                  {filteredProducts.length === 0 && <div className="col-span-full py-20 text-center text-gray-400"><Package size={64} className="mx-auto mb-4 opacity-30" /><p className="text-2xl font-bold">沒有找到相關商品</p></div>}
                 </div>
-              </div>
-              <div className="h-10 bg-gray-200 border-t-2 border-gray-300 flex items-center px-6 text-sm text-gray-600 justify-between font-bold">
-                 <div>總商品數: {products.length} | 顯示: {filteredProducts.length}</div>
-                 <div className="flex items-center gap-2">{lastSound && <span className="text-blue-700 font-bold animate-ping mr-2 text-base">🎵 音效播放中</span>}<Volume2 size={18} /> 音效開啟</div>
               </div>
             </div>
 
+            {/* Cart Panel */}
             <div className="w-full md:w-1/3 min-w-[320px] max-w-[450px] flex-none bg-white flex flex-col border-l-2 border-gray-300 shadow-2xl z-20">
               <div className="p-4 bg-slate-800 text-white">
                 <form onSubmit={handleBarcodeSubmit} className="relative flex gap-2">
                   <div className="relative flex-1">
                     <QrCode className="absolute left-3 top-3.5 text-gray-400" size={24} />
-                    <input 
-                      ref={barcodeInputRef} 
-                      type="text" 
-                      value={barcodeInput} 
-                      onChange={handleBarcodeInput} 
-                      placeholder={`掃描條碼 (${currentFormat.name})`} 
-                      className="w-full bg-slate-700 border-2 border-slate-600 rounded-xl pl-12 pr-4 py-3 text-xl text-white placeholder-gray-400 focus:ring-4 focus:ring-blue-500 focus:outline-none font-bold" 
-                      autoFocus 
-                      inputMode="none" 
-                    />
+                    <input ref={barcodeInputRef} type="text" value={barcodeInput} onChange={handleBarcodeInput} placeholder={`掃描條碼 (${currentFormat.name})`} className="w-full bg-slate-700 border-2 border-slate-600 rounded-xl pl-12 pr-4 py-3 text-xl text-white placeholder-gray-400 focus:ring-4 focus:ring-blue-500 focus:outline-none font-bold" autoFocus inputMode="none" />
                   </div>
                 </form>
               </div>
-
               <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-gray-100">
                 {cart.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-gray-400 space-y-4 opacity-60"><ShoppingCart size={80} /><p className="text-2xl font-bold">購物車是空的</p><p className="text-lg">掃描商品或點擊左側按鈕</p></div>
@@ -1237,7 +1178,6 @@ export default function App() {
                         <div className="text-lg text-gray-500 font-bold">${item.price} x {item.qty}</div>
                       </div>
                       <div className="font-black text-3xl text-blue-700 w-24 text-right mr-4">${item.price * item.qty}</div>
-                      
                       <div className="flex items-center gap-2">
                         <button onClick={() => updateQty(item.id, -1)} className="w-12 h-12 flex items-center justify-center bg-gray-200 hover:bg-gray-300 rounded-lg text-gray-700 transition-colors shadow-sm active:scale-95"><Minus size={28} strokeWidth={3} /></button>
                         <button onClick={() => updateQty(item.id, 1)} className="w-12 h-12 flex items-center justify-center bg-blue-100 hover:bg-blue-200 rounded-lg text-blue-700 transition-colors shadow-sm active:scale-95"><Plus size={28} strokeWidth={3} /></button>
@@ -1247,7 +1187,6 @@ export default function App() {
                   ))
                 )}
               </div>
-
               <div className="p-6 bg-white border-t-2 border-gray-200 shadow-[0_-8px_30px_rgba(0,0,0,0.1)]">
                 <div className="flex justify-between items-end mb-6"><span className="text-gray-500 font-bold text-2xl">總金額</span><span className="text-6xl font-black text-slate-900 tracking-tight">${cartTotal.toLocaleString()}</span></div>
                 <div className="grid grid-cols-4 gap-4">
@@ -1259,27 +1198,18 @@ export default function App() {
           </>
         )}
 
+        {/* Inventory View */}
         {currentView === 'inventory' && (
           <div className="flex-1 bg-white p-8 overflow-y-auto">
             <div className="max-w-6xl mx-auto">
               <div className="flex justify-between items-center mb-8">
                 <h2 className="text-3xl font-black text-gray-800 flex items-center gap-3"><Box className="text-blue-600" size={36}/>庫存管理</h2>
                 <div className="flex gap-4">
-                  <button 
-                    onClick={handleDownloadTemplate}
-                    className="flex items-center gap-3 px-6 py-3 bg-gray-100 text-gray-600 hover:bg-gray-200 rounded-xl font-bold transition-colors border-2 border-gray-300 text-xl shadow-sm"
-                  >
-                    <FileDown size={24} /> 下載範例 CSV
-                  </button>
-                  <button 
-                    onClick={triggerFileUpload}
-                    className="flex items-center gap-3 px-6 py-3 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-xl font-bold transition-colors border-2 border-blue-200 text-xl shadow-sm"
-                  >
-                    <Upload size={24} /> 匯入商品 (CSV)
-                  </button>
+                  <button onClick={handleRestoreStock} className="flex items-center gap-3 px-6 py-3 bg-orange-100 text-orange-700 hover:bg-orange-200 rounded-xl font-bold transition-colors border-2 border-orange-200 text-xl shadow-sm"><ArchiveRestore size={24} /> ↺ 恢復每日庫存</button>
+                  <button onClick={handleDownloadTemplate} className="flex items-center gap-3 px-6 py-3 bg-gray-100 text-gray-600 hover:bg-gray-200 rounded-xl font-bold transition-colors border-2 border-gray-300 text-xl shadow-sm"><FileDown size={24} /> 下載範例 CSV</button>
+                  <button onClick={triggerFileUpload} className="flex items-center gap-3 px-6 py-3 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-xl font-bold transition-colors border-2 border-blue-200 text-xl shadow-sm"><Upload size={24} /> 匯入商品 (CSV)</button>
                 </div>
               </div>
-              
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {products.map(p => (
                    <div key={p.id} className="p-6 border-2 border-gray-200 rounded-2xl flex justify-between items-center bg-white shadow-sm hover:shadow-md transition-all hover:border-blue-300 group cursor-pointer" onClick={() => handleRestock(p)}>
@@ -1288,11 +1218,7 @@ export default function App() {
                        <div className="text-lg text-gray-500 font-medium">條碼: {p.barcode || "無"}</div>
                      </div>
                      <div className="text-right">
-                       <button 
-                         className={`text-3xl font-black px-6 py-2 rounded-xl border-2 transition-colors flex items-center gap-3 shadow-inner
-                           ${p.stock < 10 ? 'border-red-200 bg-red-50 text-red-600' : 'border-blue-100 bg-blue-50 text-blue-600'}
-                         `}
-                       >
+                       <button className={`text-3xl font-black px-6 py-2 rounded-xl border-2 transition-colors flex items-center gap-3 shadow-inner ${p.stock < 10 ? 'border-red-200 bg-red-50 text-red-600' : 'border-blue-100 bg-blue-50 text-blue-600'}`}>
                          {p.stock} <Edit3 size={20} className="opacity-50 group-hover:opacity-100"/>
                        </button>
                        <div className="text-sm text-gray-400 mt-2 font-bold">點擊修改</div>
@@ -1304,15 +1230,15 @@ export default function App() {
           </div>
         )}
 
+        {/* History View */}
         {currentView === 'history' && (
           <div className="flex-1 bg-white p-8 overflow-y-auto">
              <div className="max-w-6xl mx-auto">
                <div className="flex justify-between items-center mb-8">
                  <h2 className="text-3xl font-black text-gray-800 flex items-center gap-3"><History className="text-blue-600" size={36} />本日銷售紀錄</h2>
                  <div className="flex gap-4 items-center">
-                    <button onClick={handleExportProductCSV} className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-lg font-bold text-xl transition-colors"><FileText size={24} />匯出商品統計</button>
-                    <button onClick={handleExportCSV} className="flex items-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl shadow-lg font-bold text-xl transition-colors"><Download size={24} />匯出訂單明細</button>
-                    <div className="bg-blue-50 px-6 py-4 rounded-xl border-2 border-blue-200 shadow-sm ml-4"><span className="text-blue-700 font-bold text-xl">今日總營收：</span><span className="text-4xl font-black text-blue-900 ml-2">${transactions.reduce((acc, t) => acc + t.total, 0).toLocaleString()}</span></div>
+                    <button onClick={handleOpenExportMenu} className="flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl shadow-lg font-bold text-xl transition-colors"><FolderOpen size={24} /> 匯出報表選單</button>
+                    <div className="bg-blue-50 px-6 py-4 rounded-xl border-2 border-blue-200 shadow-sm ml-4"><span className="text-blue-700 font-bold text-xl">今日總營收：</span><span className="text-4xl font-black text-blue-900 ml-2">${todayTotal.toLocaleString()}</span></div>
                  </div>
                </div>
                {transactions.length === 0 ? (
@@ -1346,20 +1272,8 @@ export default function App() {
                            </td>
                            <td className="px-8 py-6 text-center">
                              <div className="flex items-center justify-center gap-2">
-                               <button 
-                                 onClick={() => handleEditTransaction(t)} 
-                                 className="text-orange-500 hover:bg-orange-50 p-3 rounded-lg border border-orange-200 hover:border-orange-300 font-bold flex items-center gap-1 transition-colors" 
-                                 title="修改訂單"
-                               >
-                                 <Edit3 size={20} /> 修改
-                               </button>
-                               <button 
-                                 onClick={() => voidTransaction(t.id)} 
-                                 className="text-red-500 hover:bg-red-50 p-3 rounded-lg border border-red-200 hover:border-red-300 font-bold flex items-center gap-1 transition-colors" 
-                                 title="刪除訂單"
-                               >
-                                 <Trash2 size={20} /> 刪除
-                               </button>
+                               <button onClick={() => handleEditTransaction(t)} className="text-orange-500 hover:bg-orange-50 p-3 rounded-lg border border-orange-200 hover:border-orange-300 font-bold flex items-center gap-1 transition-colors" title="修改訂單"><Edit3 size={20} /> 修改</button>
+                               <button onClick={() => voidTransaction(t.id)} className="text-red-500 hover:bg-red-50 p-3 rounded-lg border border-red-200 hover:border-red-300 font-bold flex items-center gap-1 transition-colors" title="刪除訂單"><Trash2 size={20} /> 刪除</button>
                              </div>
                            </td>
                          </tr>
@@ -1379,26 +1293,15 @@ export default function App() {
               <div className="flex justify-between items-center mb-8">
                 <h2 className="text-3xl font-black text-gray-800 flex items-center gap-3"><Settings className="text-blue-600" size={36}/>系統設定</h2>
               </div>
-
               <div className="bg-white rounded-3xl shadow-xl border-2 border-gray-200 overflow-hidden mb-8">
                 <div className="bg-gray-100 px-8 py-6 border-b-2 border-gray-200">
-                  <h3 className="text-2xl font-black text-gray-800 flex items-center gap-3">
-                    <ScanLine size={28}/> 條碼掃描設定
-                  </h3>
+                  <h3 className="text-2xl font-black text-gray-800 flex items-center gap-3"><ScanLine size={28}/> 條碼掃描設定</h3>
                   <p className="text-gray-500 mt-2">選擇您使用的條碼格式，系統會依此顯示提示標籤。</p>
                 </div>
                 <div className="p-8">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {BARCODE_FORMATS.map(fmt => (
-                      <button
-                        key={fmt.id}
-                        onClick={() => setSettings({ ...settings, barcodeFormat: fmt.id })}
-                        className={`relative flex flex-col p-6 rounded-2xl border-4 text-left transition-all active:scale-95
-                          ${settings.barcodeFormat === fmt.id 
-                            ? 'border-blue-500 bg-blue-50 shadow-lg scale-[1.02]' 
-                            : 'border-gray-200 hover:border-blue-200 hover:bg-gray-50'}
-                        `}
-                      >
+                      <button key={fmt.id} onClick={() => setSettings({ ...settings, barcodeFormat: fmt.id })} className={`relative flex flex-col p-6 rounded-2xl border-4 text-left transition-all active:scale-95 ${settings.barcodeFormat === fmt.id ? 'border-blue-500 bg-blue-50 shadow-lg scale-[1.02]' : 'border-gray-200 hover:border-blue-200 hover:bg-gray-50'}`}>
                         <div className="flex justify-between items-start w-full mb-2">
                           <span className="text-2xl font-black text-gray-800">{fmt.name}</span>
                           {settings.barcodeFormat === fmt.id && <CheckCircle className="text-blue-600" size={32} fill="currentColor" stroke="white" />}
@@ -1410,35 +1313,28 @@ export default function App() {
                   </div>
                 </div>
               </div>
-
-              {/* 掃描測試區 */}
-              <div className="bg-white rounded-3xl shadow-xl border-2 border-gray-200 overflow-hidden">
+              <div className="bg-white rounded-3xl shadow-xl border-2 border-gray-200 overflow-hidden mb-8">
                 <div className="bg-gray-100 px-8 py-6 border-b-2 border-gray-200">
-                  <h3 className="text-2xl font-black text-gray-800 flex items-center gap-3">
-                    <CheckSquare size={28}/> 掃描測試區
-                  </h3>
+                  <h3 className="text-2xl font-black text-gray-800 flex items-center gap-3"><CheckSquare size={28}/> 掃描測試區</h3>
                   <p className="text-gray-500 mt-2">請在此測試您的掃描槍是否能正確讀取。</p>
                 </div>
                 <div className="p-8">
-                  <input 
-                    type="text" 
-                    placeholder="請在此掃描任意條碼..." 
-                    className="w-full p-6 text-3xl font-bold border-4 border-gray-300 rounded-2xl focus:border-green-500 focus:outline-none text-center text-gray-600"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        playSound('beep');
-                        alert(`掃描成功！內容：${e.target.value}`);
-                        e.target.value = '';
-                      }
-                    }}
-                  />
+                  <input type="text" placeholder="請在此掃描任意條碼..." className="w-full p-6 text-3xl font-bold border-4 border-gray-300 rounded-2xl focus:border-green-500 focus:outline-none text-center text-gray-600" onKeyDown={(e) => { if (e.key === 'Enter') { playSound('beep'); alert(`掃描成功！內容：${e.target.value}`); e.target.value = ''; } }} />
                 </div>
               </div>
-
+              <div className="bg-red-50 rounded-3xl shadow-xl border-2 border-red-200 overflow-hidden">
+                <div className="bg-red-100 px-8 py-6 border-b-2 border-red-200">
+                  <h3 className="text-2xl font-black text-red-800 flex items-center gap-3"><AlertTriangle size={28}/> 危險區域</h3>
+                  <p className="text-red-600 mt-2 font-bold">請小心操作，此動作無法復原。</p>
+                </div>
+                <div className="p-8">
+                  <button onClick={handleResetSystem} className="w-full py-4 rounded-xl bg-red-600 text-white font-black text-xl shadow-lg hover:bg-red-700 active:scale-95 transition-all flex items-center justify-center gap-3"><Trash2 size={24} /> ⚠️ 清除所有資料並重置系統</button>
+                  <p className="text-center text-gray-500 mt-4 font-bold">這將會刪除所有銷售紀錄、重置庫存，並將系統恢復到初始狀態。</p>
+                </div>
+              </div>
             </div>
           </div>
         )}
-
       </main>
     </div>
   );
