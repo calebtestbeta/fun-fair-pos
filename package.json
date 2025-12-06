@@ -1,7 +1,7 @@
 {
   "name": "fun-fair-pos",
   "private": true,
-  "version": "3.0.0",
+  "version": "3.1.0",
   "main": "electron/main.js",
   "description": "園遊會專用離線 POS 系統",
   "author": "Your Name",

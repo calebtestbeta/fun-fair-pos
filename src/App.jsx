@@ -29,7 +29,9 @@ import {
   FileText,
   Delete,
   FileDown,
-  Keyboard // 新增鍵盤圖示
+  Keyboard,
+  ScanLine, // 新增圖示
+  CheckSquare // 新增圖示
 } from 'lucide-react';
 
 // --- MOCK DATA: 預設商品清單 ---
@@ -64,9 +66,18 @@ const INITIAL_PRODUCTS = [
   { id: 407, name: "紀念徽章", price: 30, category: "其他", barcode: "407", stock: 50 },
 ];
 
+// 定義支援的條碼格式
+const BARCODE_FORMATS = [
+  { id: 'CODE39', name: 'Code 39', desc: '園遊會券/識別證常用 (支援英文+數字)', color: 'bg-blue-100 text-blue-800 border-blue-300' },
+  { id: 'EAN13', name: 'EAN-13', desc: '一般零售商品 (13位數字)', color: 'bg-green-100 text-green-800 border-green-300' },
+  { id: 'CODE128', name: 'Code 128', desc: '高密度通用格式 (物流/倉儲)', color: 'bg-purple-100 text-purple-800 border-purple-300' },
+  { id: 'ANY', name: '不限制', desc: '接受所有格式', color: 'bg-gray-100 text-gray-800 border-gray-300' },
+];
+
 const STORAGE_KEYS = {
   PRODUCTS: 'pos_products_v1',
-  TRANSACTIONS: 'pos_transactions_v1'
+  TRANSACTIONS: 'pos_transactions_v1',
+  SETTINGS: 'pos_settings_v1' // 新增設定存檔
 };
 
 const EMPTY_ARRAY = [];
@@ -145,20 +156,17 @@ const Numpad = ({ onInput, onDelete, className = "" }) => {
   );
 };
 
-// --- Modal Component (加入虛擬鍵盤控制) ---
+// --- Modal Component ---
 const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMPTY_ARRAY, paymentInfo = null, editItems = null, allProducts = [], autoCloseDelay = null }) => {
   const [inputValues, setInputValues] = useState({});
   const [receivedAmount, setReceivedAmount] = useState('');
   const [currentEditItems, setCurrentEditItems] = useState([]);
   const [selectedProductId, setSelectedProductId] = useState('');
   const [activeInput, setActiveInput] = useState(null); 
-  
-  // 控制是否使用原生鍵盤
   const [useNativeKeyboard, setUseNativeKeyboard] = useState(false);
 
   const changeAmount = paymentInfo ? (parseInt(receivedAmount || 0) - paymentInfo.total) : 0;
 
-  // 自動關閉計時器
   useEffect(() => {
     if (isOpen && autoCloseDelay) {
       const timer = setTimeout(() => {
@@ -185,7 +193,7 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
         setActiveInput('received');
       }
       setSelectedProductId('');
-      setUseNativeKeyboard(false); // 每次開啟 Modal 預設關閉原生鍵盤
+      setUseNativeKeyboard(false); 
     }
   }, [isOpen, inputs, editItems, type]);
 
@@ -330,10 +338,10 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
                         <input
                         type={input.type || 'text'}
                         name={input.name}
-                        value={inputValues[input.name] || ''}
+                        value={inputValues[input.name] ?? ''}
                         onChange={handleInputChange}
                         readOnly={input.readOnly}
-                        inputMode={useNativeKeyboard ? (input.type === 'number' ? 'numeric' : 'text') : 'none'} // 控制 iPad 鍵盤
+                        inputMode={useNativeKeyboard ? (input.type === 'number' ? 'numeric' : 'text') : 'none'}
                         onFocus={() => !input.readOnly && setActiveInput(input.name)}
                         className={`w-full px-6 py-4 border-2 rounded-xl focus:outline-none text-2xl font-bold text-gray-900 
                             ${activeInput === input.name ? 'border-blue-500 ring-4 ring-blue-200' : 'border-gray-300'}
@@ -401,7 +409,7 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
                           <td className="p-4">
                             <input 
                               type="number" 
-                              value={item.price} 
+                              value={item.price ?? ''} 
                               inputMode={useNativeKeyboard ? 'numeric' : 'none'}
                               onFocus={() => setActiveInput(`edit-${idx}-price`)}
                               onChange={(e) => handleEditItemChange(idx, 'price', parseInt(e.target.value))}
@@ -514,7 +522,7 @@ const Modal = ({ isOpen, type, title, message, onConfirm, onCancel, inputs = EMP
 
 // --- 主程式元件 ---
 export default function App() {
-  const [currentView, setCurrentView] = useState('pos');
+  const [currentView, setCurrentView] = useState('pos'); // pos, history, inventory, settings
   
   // STATE: 讀取 LocalStorage 或使用預設值
   const [products, setProducts] = useState(() => {
@@ -524,6 +532,12 @@ export default function App() {
   const [transactions, setTransactions] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
     return saved ? JSON.parse(saved) : [];
+  });
+  
+  // 新增 Settings State: 預設 code39
+  const [settings, setSettings] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+    return saved ? JSON.parse(saved) : { barcodeFormat: 'CODE39' };
   });
 
   const [cart, setCart] = useState([]);
@@ -536,11 +550,14 @@ export default function App() {
   const fileInputRef = useRef(null);
   const lastScanTimeRef = useRef(0);
 
-  // 計算動態分類 (Dynamic Categories)
+  // 計算動態分類
   const dynamicCategories = useMemo(() => {
     const cats = new Set(products.map(p => p.category));
     return ["全部", ...Array.from(cats)];
   }, [products]);
+
+  // 取得目前設定的條碼格式資訊
+  const currentFormat = BARCODE_FORMATS.find(f => f.id === settings.barcodeFormat) || BARCODE_FORMATS[0];
 
   // EFFECT: 自動存檔
   useEffect(() => {
@@ -550,6 +567,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
   }, [transactions]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+  }, [settings]);
 
   // --- 計算邏輯 ---
   const cartTotal = useMemo(() => {
@@ -606,9 +627,28 @@ export default function App() {
     if (!file) return;
 
     const reader = new FileReader();
+    // 修改：改用 readAsArrayBuffer 以便進行編碼偵測
     reader.onload = (e) => {
       try {
-        const text = e.target.result;
+        const buffer = e.target.result;
+        let text = '';
+        
+        // 1. 嘗試使用 UTF-8 解碼 (設定 fatal: true 以便在解碼失敗時拋出錯誤)
+        const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
+        try {
+          text = utf8Decoder.decode(buffer);
+        } catch (error) {
+          // 2. 如果 UTF-8 失敗，假設是 Big5 (Windows Excel 預設)
+          console.log("UTF-8 decoding failed, trying Big5...");
+          const big5Decoder = new TextDecoder('big5');
+          text = big5Decoder.decode(buffer);
+        }
+
+        // 移除可能存在的 BOM (Byte Order Mark)
+        if (text.charCodeAt(0) === 0xFEFF) {
+          text = text.slice(1);
+        }
+
         const rows = text.split(/\r\n|\n/).filter(row => row.trim() !== '');
         const dataRows = rows.slice(1);
         
@@ -654,18 +694,20 @@ export default function App() {
         });
 
       } catch (error) {
+        console.error(error);
         playSound('error');
         setModalConfig({
           isOpen: true,
           type: 'info',
           title: '匯入失敗',
-          message: '無法解析 CSV 檔案，請確認格式是否正確。\n格式範例：名稱,價格,分類,條碼,庫存',
+          message: '無法解析 CSV 檔案，請確認格式是否正確。\n建議使用 UTF-8 或 Big5 編碼格式。',
           onConfirm: closeModal
         });
         event.target.value = '';
       }
     };
-    reader.readAsText(file);
+    // 使用 ArrayBuffer 讀取原始位元組
+    reader.readAsArrayBuffer(file);
   };
 
   const triggerFileUpload = () => {
@@ -1088,6 +1130,7 @@ export default function App() {
           <button onClick={() => setCurrentView('pos')} className={`flex items-center gap-3 px-6 py-3 rounded-lg transition-all font-bold text-xl ${currentView === 'pos' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:bg-slate-700 hover:text-white'}`}><ShoppingCart size={24} /><span>收銀台</span></button>
           <button onClick={() => setCurrentView('inventory')} className={`flex items-center gap-3 px-6 py-3 rounded-lg transition-all font-bold text-xl ${currentView === 'inventory' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:bg-slate-700 hover:text-white'}`}><Box size={24} /><span>庫存管理</span></button>
           <button onClick={() => setCurrentView('history')} className={`flex items-center gap-3 px-6 py-3 rounded-lg transition-all font-bold text-xl ${currentView === 'history' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:bg-slate-700 hover:text-white'}`}><History size={24} /><span>銷售紀錄</span></button>
+          <button onClick={() => setCurrentView('settings')} className={`flex items-center gap-3 px-6 py-3 rounded-lg transition-all font-bold text-xl ${currentView === 'settings' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:bg-slate-700 hover:text-white'}`}><Settings size={24} /><span>設定</span></button>
         </nav>
         <div className="flex items-center gap-4">
            <button onClick={handleResetSystem} className="flex items-center gap-2 text-red-300 hover:text-white hover:bg-red-900/80 px-4 py-2 rounded-lg border border-red-800/50 transition-colors font-bold">
@@ -1105,7 +1148,17 @@ export default function App() {
                   <Search className="absolute left-4 top-4 text-gray-500" size={24} />
                   <input type="text" placeholder="搜尋商品..." className="pl-12 pr-4 py-3 rounded-xl border-2 border-gray-300 focus:outline-none focus:ring-4 focus:ring-blue-500 w-64 shadow-sm text-xl font-bold" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
                 </div>
+                
                 <div className="h-10 w-0.5 bg-gray-300 mx-2"></div>
+                
+                {/* 顯示目前的條碼格式 */}
+                <div className={`px-4 py-2 rounded-lg border-2 text-sm font-bold flex items-center gap-2 ${currentFormat.color}`}>
+                  <ScanLine size={18} />
+                  {currentFormat.name}
+                </div>
+
+                <div className="h-10 w-0.5 bg-gray-300 mx-2"></div>
+                
                 <div className="flex gap-3">
                   {dynamicCategories.map(cat => (
                     <button key={cat} onClick={() => setSelectedCategory(cat)} className={`px-6 py-3 rounded-xl text-xl font-bold whitespace-nowrap transition-colors shadow-sm border-2 ${selectedCategory === cat ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-700 hover:bg-gray-200 border-gray-300'}`}>{cat}</button>
@@ -1129,12 +1182,10 @@ export default function App() {
                       className={`min-h-[160px] flex flex-col justify-between p-4 rounded-2xl border-b-8 transition-all shadow-md relative group
                         ${isSoldOut ? 'bg-gray-100 border-gray-200 text-gray-400/50 cursor-not-allowed' : `${getCategoryColor(product.category)} active:scale-95 hover:shadow-xl hover:-translate-y-1`}`}
                     >
-                      {/* 售完時的標籤，不遮擋文字 */}
                       {isSoldOut && <div className="absolute top-2 right-2 bg-red-600 text-white text-sm font-black px-3 py-1 rounded-full shadow-md z-10 animate-pulse">已售完</div>}
                       
                       <div className="w-full flex justify-between items-start mb-2">
                         <span className={`text-lg font-black px-2 py-1 rounded-lg ${isSoldOut ? 'bg-gray-200 text-gray-400' : 'bg-white/60 text-gray-800'}`}>{product.category}</span>
-                        {/* 庫存顯示 - 改為文字標籤 */}
                         {!isSoldOut && <span className={`text-lg font-bold px-2 py-1 rounded-lg flex items-center gap-1 ${product.stock < 10 ? 'bg-red-100 text-red-700' : 'bg-white/60 text-gray-700'}`}>
                           剩餘 {product.stock}
                         </span>}
@@ -1165,14 +1216,13 @@ export default function App() {
                       ref={barcodeInputRef} 
                       type="text" 
                       value={barcodeInput} 
-                      onChange={handleBarcodeInput} // 改回正確的 onChange handler
-                      placeholder="掃描條碼 (Focus)" 
+                      onChange={handleBarcodeInput} 
+                      placeholder={`掃描條碼 (${currentFormat.name})`} 
                       className="w-full bg-slate-700 border-2 border-slate-600 rounded-xl pl-12 pr-4 py-3 text-xl text-white placeholder-gray-400 focus:ring-4 focus:ring-blue-500 focus:outline-none font-bold" 
                       autoFocus 
-                      inputMode="none" // 預設不顯示鍵盤
+                      inputMode="none" 
                     />
                   </div>
-                  {/* 主畫面不需要鍵盤切換，因為主要是掃描槍用 */}
                 </form>
               </div>
 
@@ -1321,6 +1371,74 @@ export default function App() {
              </div>
           </div>
         )}
+
+        {/* VIEW: Settings */}
+        {currentView === 'settings' && (
+          <div className="flex-1 bg-white p-8 overflow-y-auto">
+            <div className="max-w-6xl mx-auto">
+              <div className="flex justify-between items-center mb-8">
+                <h2 className="text-3xl font-black text-gray-800 flex items-center gap-3"><Settings className="text-blue-600" size={36}/>系統設定</h2>
+              </div>
+
+              <div className="bg-white rounded-3xl shadow-xl border-2 border-gray-200 overflow-hidden mb-8">
+                <div className="bg-gray-100 px-8 py-6 border-b-2 border-gray-200">
+                  <h3 className="text-2xl font-black text-gray-800 flex items-center gap-3">
+                    <ScanLine size={28}/> 條碼掃描設定
+                  </h3>
+                  <p className="text-gray-500 mt-2">選擇您使用的條碼格式，系統會依此顯示提示標籤。</p>
+                </div>
+                <div className="p-8">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {BARCODE_FORMATS.map(fmt => (
+                      <button
+                        key={fmt.id}
+                        onClick={() => setSettings({ ...settings, barcodeFormat: fmt.id })}
+                        className={`relative flex flex-col p-6 rounded-2xl border-4 text-left transition-all active:scale-95
+                          ${settings.barcodeFormat === fmt.id 
+                            ? 'border-blue-500 bg-blue-50 shadow-lg scale-[1.02]' 
+                            : 'border-gray-200 hover:border-blue-200 hover:bg-gray-50'}
+                        `}
+                      >
+                        <div className="flex justify-between items-start w-full mb-2">
+                          <span className="text-2xl font-black text-gray-800">{fmt.name}</span>
+                          {settings.barcodeFormat === fmt.id && <CheckCircle className="text-blue-600" size={32} fill="currentColor" stroke="white" />}
+                        </div>
+                        <p className="text-gray-500 font-medium text-lg">{fmt.desc}</p>
+                        <div className={`mt-4 px-3 py-1 rounded text-sm font-bold w-fit ${fmt.color}`}>範例標籤</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* 掃描測試區 */}
+              <div className="bg-white rounded-3xl shadow-xl border-2 border-gray-200 overflow-hidden">
+                <div className="bg-gray-100 px-8 py-6 border-b-2 border-gray-200">
+                  <h3 className="text-2xl font-black text-gray-800 flex items-center gap-3">
+                    <CheckSquare size={28}/> 掃描測試區
+                  </h3>
+                  <p className="text-gray-500 mt-2">請在此測試您的掃描槍是否能正確讀取。</p>
+                </div>
+                <div className="p-8">
+                  <input 
+                    type="text" 
+                    placeholder="請在此掃描任意條碼..." 
+                    className="w-full p-6 text-3xl font-bold border-4 border-gray-300 rounded-2xl focus:border-green-500 focus:outline-none text-center text-gray-600"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        playSound('beep');
+                        alert(`掃描成功！內容：${e.target.value}`);
+                        e.target.value = '';
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )}
+
       </main>
     </div>
   );
