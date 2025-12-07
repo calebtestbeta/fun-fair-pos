@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   ShoppingCart, 
   Trash2, 
@@ -68,6 +68,68 @@ const INITIAL_PRODUCTS = [
   { id: 407, name: "紀念徽章", price: 30, category: "其他", barcode: "407", stock: 50 },
 ];
 
+// --- MOCK DATA: Demo 模式用的資料 ---
+const DEMO_PRODUCTS = [
+  { id: 101, name: "烤香腸", price: 35, category: "熱食", barcode: "101", stock: 80 },
+  { id: 102, name: "大腸包小腸", price: 60, category: "熱食", barcode: "102", stock: 45 },
+  { id: 103, name: "炒米粉", price: 50, category: "熱食", barcode: "103", stock: 50 },
+  { id: 105, name: "鹹酥雞", price: 80, category: "熱食", barcode: "105", stock: 30 },
+  { id: 201, name: "古早味紅茶", price: 25, category: "飲料", barcode: "201", stock: 150 },
+  { id: 202, name: "珍珠奶茶", price: 50, category: "飲料", barcode: "202", stock: 90 },
+  { id: 301, name: "雞蛋糕", price: 40, category: "點心", barcode: "301", stock: 70 },
+  { id: 302, name: "霜淇淋", price: 35, category: "點心", barcode: "302", stock: 80 },
+  { id: 401, name: "套圈圈(1局)", price: 50, category: "遊戲", barcode: "401", stock: 999 },
+  { id: 901, name: "Demo限定商品", price: 99, category: "其他", barcode: "901", stock: 20 },
+];
+
+const DEMO_TRANSACTIONS = (() => {
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+
+  const formatTime = (date) => date.toLocaleString();
+
+  return [
+    {
+      id: 1700000001,
+      time: formatTime(now),
+      items: [
+        { id: 101, name: "烤香腸", price: 35, qty: 2 },
+        { id: 201, name: "古早味紅茶", price: 25, qty: 1 }
+      ],
+      total: 95, received: 100, change: 5, status: 'completed'
+    },
+    {
+      id: 1700000002,
+      time: formatTime(now),
+      items: [
+        { id: 102, name: "大腸包小腸", price: 60, qty: 1 },
+        { id: 301, name: "雞蛋糕", price: 40, qty: 2 }
+      ],
+      total: 140, received: 150, change: 10, status: 'completed'
+    },
+    {
+      id: 1700000003,
+      time: formatTime(yesterday),
+      items: [
+        { id: 202, name: "珍珠奶茶", price: 50, qty: 1 },
+        { id: 901, name: "Demo限定商品", price: 99, qty: 1 }
+      ],
+      total: 149, received: 150, change: 1, status: 'completed'
+    },
+    {
+      id: 1700000004,
+      time: formatTime(yesterday),
+      items: [
+        { id: 401, name: "套圈圈(1局)", price: 50, qty: 3 }
+      ],
+      total: 150, received: 200, change: 50, status: 'completed'
+    }
+  ];
+})();
+
+const DEMO_IMPORTED_SNAPSHOT = JSON.parse(JSON.stringify(DEMO_PRODUCTS));
+
 const BARCODE_FORMATS = [
   { id: 'CODE39', name: 'Code 39', desc: '園遊會券/識別證常用 (支援英文+數字)', color: 'bg-blue-100 text-blue-800 border-blue-300' },
   { id: 'EAN13', name: 'EAN-13', desc: '一般零售商品 (13位數字)', color: 'bg-green-100 text-green-800 border-green-300' },
@@ -79,7 +141,22 @@ const STORAGE_KEYS = {
   PRODUCTS: 'pos_products_v1',
   TRANSACTIONS: 'pos_transactions_v1',
   SETTINGS: 'pos_settings_v1',
-  IMPORTED_SNAPSHOT: 'pos_imported_snapshot_v1'
+  IMPORTED_SNAPSHOT: 'pos_imported_snapshot_v1',
+  // Demo Mode Keys
+  IS_DEMO_MODE: 'pos_is_demo_mode',
+  PRODUCTS_DEMO: 'pos_products_demo_v1',
+  TRANSACTIONS_DEMO: 'pos_transactions_demo_v1',
+  IMPORTED_SNAPSHOT_DEMO: 'pos_imported_snapshot_demo_v1'
+};
+
+const getLocalStorageItem = (key, defaultValue) => {
+  try {
+    const item = localStorage.getItem(key);
+    return item ? JSON.parse(item) : defaultValue;
+  } catch (error) {
+    console.error(`Error parsing localStorage key "${key}":`, error);
+    return defaultValue;
+  }
 };
 
 const EMPTY_ARRAY = [];
@@ -160,18 +237,21 @@ const Numpad = ({ onInput, onDelete, className = "" }) => {
 
 // --- Modal Component ---
 const Modal = ({ 
-  isOpen, 
-  type, 
-  title, 
-  message, 
-  onConfirm, 
-  onCancel, 
-  inputs = EMPTY_ARRAY, 
-  paymentInfo = null, 
-  editItems = null, 
-  allProducts = [], 
+  isOpen,
+  type,
+  title,
+  message,
+  onConfirm,
+  onCancel,
+  inputs = EMPTY_ARRAY,
+  paymentInfo = null,
+  editItems = null,
+  allProducts = [],
   autoCloseDelay = null,
-  onExportAction = null // 新增：專門給匯出選單用的 callback
+  onExportAction = null, // 新增：專門給匯出選單用的 callback
+  editReceivedAmount = '',
+  setEditReceivedAmount = () => {},
+  originalTransaction = null
 }) => {
   const [inputValues, setInputValues] = useState({});
   const [receivedAmount, setReceivedAmount] = useState('');
@@ -201,6 +281,12 @@ const Modal = ({
       }
       if (editItems) {
         setCurrentEditItems(JSON.parse(JSON.stringify(editItems)));
+        // 如果有原始交易資訊，預填付款金額
+        if (originalTransaction && originalTransaction.received) {
+          setEditReceivedAmount(originalTransaction.received.toString());
+        } else {
+          setEditReceivedAmount('');
+        }
         setActiveInput(null);
       }
       if (type === 'payment') {
@@ -210,12 +296,15 @@ const Modal = ({
       setSelectedProductId('');
       setUseNativeKeyboard(false); 
     }
-  }, [isOpen, inputs, editItems, type]);
+  }, [isOpen, inputs, editItems, type, originalTransaction, setEditReceivedAmount]);
 
   const handleNumpadInput = (value) => {
     const valStr = String(value);
     if (activeInput === 'received' && type === 'payment') {
       setReceivedAmount(prev => (prev + valStr).slice(0, 8));
+    } else if (activeInput === 'edit-received' && type === 'edit-transaction') {
+      // 新增：支援編輯模式的收錢輸入
+      setEditReceivedAmount(prev => (prev + valStr).slice(0, 8));
     } else if (activeInput && type === 'input') {
       setInputValues(prev => ({ ...prev, [activeInput]: (prev[activeInput] + valStr) }));
     } else if (activeInput && activeInput.startsWith('edit-') && type === 'edit-transaction') {
@@ -234,6 +323,9 @@ const Modal = ({
   const handleNumpadDelete = () => {
     if (activeInput === 'received' && type === 'payment') {
       setReceivedAmount(prev => prev.slice(0, -1));
+    } else if (activeInput === 'edit-received' && type === 'edit-transaction') {
+      // 新增：支援編輯模式的收錢刪除
+      setEditReceivedAmount(prev => prev.slice(0, -1));
     } else if (activeInput && type === 'input') {
       setInputValues(prev => ({ ...prev, [activeInput]: String(prev[activeInput]).slice(0, -1) }));
     } else if (activeInput && activeInput.startsWith('edit-') && type === 'edit-transaction') {
@@ -290,7 +382,12 @@ const Modal = ({
     if (type === 'payment') {
       onConfirm({ received: parseInt(receivedAmount || 0), change: changeAmount });
     } else if (type === 'edit-transaction') {
-      onConfirm(currentEditItems);
+      // 傳遞商品和付款資訊
+      const paymentInfo = editReceivedAmount ? {
+        received: parseInt(editReceivedAmount || 0),
+        change: editChangeAmount
+      } : null;
+      onConfirm(currentEditItems, paymentInfo);
     } else if (inputs.length > 0) {
       onConfirm(inputValues);
     } else {
@@ -302,6 +399,7 @@ const Modal = ({
 
   const showNumpad = type === 'input' || type === 'payment' || type === 'edit-transaction';
   const editTotal = currentEditItems.reduce((sum, item) => sum + (item.price * item.qty), 0);
+  const editChangeAmount = parseInt(editReceivedAmount || 0) - editTotal;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 transition-opacity">
@@ -313,13 +411,16 @@ const Modal = ({
           type === 'success' ? 'bg-green-100' : 
           type === 'payment' ? 'bg-emerald-700 text-white' : 
           type === 'edit-transaction' ? 'bg-orange-100' : 
-          type === 'export-menu' ? 'bg-slate-800 text-white' : 'bg-blue-100'
+          type === 'export-menu' ? 'bg-slate-800 text-white' : 
+          type === 'warning' ? 'bg-yellow-100' : // New warning type
+          'bg-blue-100'
         }`}>
           {type === 'danger' && <AlertTriangle className="text-red-600" size={40} />}
           {type === 'success' && <CheckCircle className="text-green-600" size={40} />}
           {type === 'payment' && <Calculator className="text-white" size={40} />}
           {type === 'edit-transaction' && <Edit3 className="text-orange-600" size={40} />}
           {type === 'export-menu' && <FolderOpen className="text-white" size={40} />}
+          {type === 'warning' && <AlertCircle className="text-yellow-600" size={40} />}
           {(type === 'info' || type === 'input') && <AlertCircle className="text-blue-600" size={40} />}
           
           <h3 className={`font-black text-3xl ${
@@ -327,7 +428,9 @@ const Modal = ({
             type === 'success' ? 'text-green-900' : 
             type === 'payment' ? 'text-white' : 
             type === 'edit-transaction' ? 'text-orange-900' : 
-            type === 'export-menu' ? 'text-white' : 'text-blue-900'
+            type === 'export-menu' ? 'text-white' : 
+            type === 'warning' ? 'text-yellow-900' : // New warning type
+            'text-blue-900'
           }`}>{title}</h3>
         </div>
         
@@ -495,6 +598,76 @@ const Modal = ({
                   <span>修正後總金額:</span>
                   <span className="text-blue-600">${editTotal}</span>
                 </div>
+
+                {/* 付款資訊區塊 */}
+                <div className="space-y-6 mt-6 pt-6 border-t-2 border-orange-200">
+                  <h4 className="text-xl font-black text-orange-700 mb-4 flex items-center gap-2">
+                    <Calculator size={24} /> 付款資訊
+                  </h4>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* 修正後總金額顯示 */}
+                    <div className="bg-orange-50 p-4 rounded-xl border border-orange-200">
+                      <label className="block text-sm font-bold text-orange-700 mb-2">修正後總金額</label>
+                      <div className="text-3xl font-black text-orange-800">${editTotal}</div>
+                    </div>
+
+                    {/* 實收金額輸入 */}
+                    <div>
+                      <label className="block text-sm font-bold text-orange-700 mb-2">實收金額</label>
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <span className="absolute left-3 top-3 text-gray-400 text-xl font-bold">$</span>
+                          <input
+                            type="number"
+                            value={editReceivedAmount}
+                            inputMode={useNativeKeyboard ? 'numeric' : 'none'}
+                            onFocus={() => setActiveInput('edit-received')}
+                            onChange={(e) => setEditReceivedAmount(e.target.value)}
+                            className={`w-full pl-8 pr-4 py-3 text-2xl font-black border-2 rounded-xl focus:outline-none transition-all text-gray-900
+                              ${activeInput === 'edit-received' ? 'border-orange-500 ring-2 ring-orange-200' : 'border-orange-300'}`}
+                            placeholder={editTotal}
+                          />
+                        </div>
+                        <button
+                          onClick={() => setUseNativeKeyboard(!useNativeKeyboard)}
+                          className={`px-3 rounded-xl border-2 transition-colors ${useNativeKeyboard ? 'bg-orange-500 text-white border-orange-500' : 'bg-gray-100 text-gray-500 border-gray-300'}`}
+                        >
+                          <Keyboard size={20} />
+                        </button>
+                      </div>
+
+                      {/* 快速金額按鈕 */}
+                      <div className="flex gap-2 mt-2">
+                        {[100, 500, 1000].map(amt => (
+                          <button
+                            key={amt}
+                            onClick={() => setEditReceivedAmount(amt.toString())}
+                            className="flex-1 py-2 text-sm bg-gray-200 hover:bg-gray-300 rounded-lg text-gray-800 font-bold transition-colors border border-gray-300"
+                          >
+                            ${amt}
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => setEditReceivedAmount(editTotal.toString())}
+                          className="flex-1 py-2 text-sm bg-orange-100 text-orange-800 hover:bg-orange-200 rounded-lg font-bold transition-colors border border-orange-300"
+                        >
+                          剛好
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 找零顯示 */}
+                    <div>
+                      <label className="block text-sm font-bold text-orange-700 mb-2">找零金額</label>
+                      <div className={`p-4 rounded-xl border-2 text-center transition-colors ${editChangeAmount < 0 ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-900'}`}>
+                        <div className="text-2xl font-black">
+                          {editChangeAmount < 0 ? '不足' : `$${editChangeAmount}`}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -588,22 +761,11 @@ export default function App() {
   const [currentView, setCurrentView] = useState('pos');
   
   // STATE: 讀取 LocalStorage 或使用預設值
-  const [products, setProducts] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
-    return saved ? JSON.parse(saved) : INITIAL_PRODUCTS;
-  });
-  const [transactions, setTransactions] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [settings, setSettings] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
-    return saved ? JSON.parse(saved) : { barcodeFormat: 'CODE39' };
-  });
-  const [importedSnapshot, setImportedSnapshot] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.IMPORTED_SNAPSHOT);
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [products, setProducts] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [settings, setSettings] = useState(() => getLocalStorageItem(STORAGE_KEYS.SETTINGS, { barcodeFormat: 'CODE39' }));
+  const [importedSnapshot, setImportedSnapshot] = useState([]);
+  const [isDemoMode, setIsDemoMode] = useState(() => getLocalStorageItem(STORAGE_KEYS.IS_DEMO_MODE, false));
 
   const [cart, setCart] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("全部");
@@ -611,6 +773,9 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [lastSound, setLastSound] = useState(null);
   const [modalConfig, setModalConfig] = useState({ isOpen: false });
+
+  // 編輯訂單時的付款狀態
+  const [editReceivedAmount, setEditReceivedAmount] = useState('');
   const barcodeInputRef = useRef(null);
   const fileInputRef = useRef(null);
   const lastScanTimeRef = useRef(0);
@@ -623,19 +788,84 @@ export default function App() {
 
   const currentFormat = BARCODE_FORMATS.find(f => f.id === settings.barcodeFormat) || BARCODE_FORMATS[0];
 
+  // --- Helper function to load data based on demo mode ---
+  const loadData = useCallback((demoMode) => {
+    if (demoMode) {
+      const demoProducts = getLocalStorageItem(STORAGE_KEYS.PRODUCTS_DEMO, DEMO_PRODUCTS);
+      setProducts(demoProducts !== null && demoProducts.length > 0 ? demoProducts : DEMO_PRODUCTS);
+
+      const demoTransactions = getLocalStorageItem(STORAGE_KEYS.TRANSACTIONS_DEMO, DEMO_TRANSACTIONS);
+      setTransactions(demoTransactions !== null && demoTransactions.length > 0 ? demoTransactions : DEMO_TRANSACTIONS);
+
+      setImportedSnapshot(getLocalStorageItem(STORAGE_KEYS.IMPORTED_SNAPSHOT_DEMO, DEMO_IMPORTED_SNAPSHOT));
+    } else {
+      // For real mode, if nothing is saved in localStorage, default to INITIAL_PRODUCTS
+      // Otherwise, load what's saved.
+      const savedProducts = getLocalStorageItem(STORAGE_KEYS.PRODUCTS, null); // Use null as default for checking existence
+      setProducts(savedProducts !== null && savedProducts.length > 0 ? savedProducts : INITIAL_PRODUCTS);
+      
+      setTransactions(getLocalStorageItem(STORAGE_KEYS.TRANSACTIONS, []));
+      setImportedSnapshot(getLocalStorageItem(STORAGE_KEYS.IMPORTED_SNAPSHOT, []));
+    }
+  }, []); // dependencies: none because we use getLocalStorageItem and specific constants
+
+  // --- 庫存自動化管理函數 ---
+  const calculateStockChanges = useCallback((originalItems, newItems) => {
+    const stockChanges = new Map();
+
+    // 計算原訂單的庫存回補
+    originalItems.forEach(item => {
+      if (!item.isCustom) {
+        stockChanges.set(item.id, (stockChanges.get(item.id) || 0) + item.qty);
+      }
+    });
+
+    // 計算新訂單的庫存扣減
+    newItems.forEach(item => {
+      if (!item.isCustom) {
+        stockChanges.set(item.id, (stockChanges.get(item.id) || 0) - item.qty);
+      }
+    });
+
+    return stockChanges;
+  }, []);
+
+  const applyStockChanges = useCallback((stockChanges) => {
+    setProducts(prevProducts =>
+      prevProducts.map(product => {
+        const change = stockChanges.get(product.id);
+        if (change !== undefined) {
+          return {
+            ...product,
+            stock: Math.max(0, product.stock + change)
+          };
+        }
+        return product;
+      })
+    );
+  }, []);
+
+  // EFFECT: Initial data load and when demo mode changes
+  useEffect(() => {
+    loadData(isDemoMode);
+  }, [isDemoMode, loadData]); // Re-run when isDemoMode changes
+
   // EFFECT: 自動存檔
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(products));
-  }, [products]);
+    localStorage.setItem(isDemoMode ? STORAGE_KEYS.PRODUCTS_DEMO : STORAGE_KEYS.PRODUCTS, JSON.stringify(products));
+  }, [products, isDemoMode]);
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
-  }, [transactions]);
+    localStorage.setItem(isDemoMode ? STORAGE_KEYS.TRANSACTIONS_DEMO : STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
+  }, [transactions, isDemoMode]);
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings)); // Settings always saves to real key
   }, [settings]);
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.IMPORTED_SNAPSHOT, JSON.stringify(importedSnapshot));
-  }, [importedSnapshot]);
+    localStorage.setItem(isDemoMode ? STORAGE_KEYS.IMPORTED_SNAPSHOT_DEMO : STORAGE_KEYS.IMPORTED_SNAPSHOT, JSON.stringify(importedSnapshot));
+  }, [importedSnapshot, isDemoMode]);
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.IS_DEMO_MODE, JSON.stringify(isDemoMode));
+  }, [isDemoMode]);
 
   // --- 計算邏輯 ---
   const cartTotal = useMemo(() => {
@@ -662,6 +892,34 @@ export default function App() {
   const closeModal = () => {
     setModalConfig({ ...modalConfig, isOpen: false });
     setTimeout(() => barcodeInputRef.current?.focus(), 100);
+  };
+
+  const handleToggleDemoMode = () => {
+    if (isDemoMode) {
+      setModalConfig({
+        isOpen: true,
+        type: 'warning', // A new type for warning
+        title: '退出 Demo 模式',
+        message: '您確定要退出 Demo 模式嗎？應用程式將重新載入真實資料。Demo 模式中的所有變更將不會保留在真實資料中。',
+        onCancel: closeModal,
+        onConfirm: () => {
+          setIsDemoMode(false);
+          closeModal();
+        }
+      });
+    } else {
+      setModalConfig({
+        isOpen: true,
+        type: 'info',
+        title: '進入 Demo 模式',
+        message: '您確定要進入 Demo 模式嗎？所有操作將使用模擬資料，且變更不會影響真實資料。',
+        onCancel: closeModal,
+        onConfirm: () => {
+          setIsDemoMode(true);
+          closeModal();
+        }
+      });
+    }
   };
 
   // ... (handleResetSystem, handleRestoreStock, handleDownloadTemplate, handleImportCSV same as before) ...
@@ -903,19 +1161,75 @@ export default function App() {
 
   const handleEditTransaction = (transaction) => {
     setModalConfig({
-      isOpen: true, type: 'edit-transaction', title: '修改訂單內容', message: '您可以修改此筆訂單的商品內容與數量。',
-      editItems: transaction.items, allProducts: products, onCancel: closeModal,
-      onConfirm: (newItems) => {
+      isOpen: true,
+      type: 'edit-transaction',
+      title: '修改訂單內容',
+      message: '您可以修改此筆訂單的商品內容、數量與付款資訊。',
+      editItems: transaction.items,
+      originalTransaction: transaction,
+      allProducts: products,
+      onCancel: closeModal,
+      onConfirm: (newItems, paymentInfo) => {
         if (newItems.length === 0) {
-          if(confirm("商品已全部清空，是否直接刪除此筆訂單？")) voidTransaction(transaction.id);
+          if(confirm("商品已全部清空，是否直接刪除此筆訂單？")) {
+            voidTransactionWithStockRestore(transaction.id, transaction.items);
+          }
           return;
         }
+
+        // 計算並應用庫存變更
+        const stockChanges = calculateStockChanges(transaction.items, newItems);
+        applyStockChanges(stockChanges);
+
+        // 計算新總金額
         const newTotal = newItems.reduce((sum, item) => sum + (item.price * item.qty), 0);
-        setTransactions(prev => prev.map(t => t.id === transaction.id ? { ...t, items: newItems, total: newTotal, isModified: true, lastModified: new Date().toLocaleString() } : t));
-        playSound('cash'); closeModal();
+
+        // 處理付款資訊 - 如果有新的付款資訊則使用，否則保留原有
+        const updatedTransaction = {
+          ...transaction,
+          items: newItems,
+          total: newTotal,
+          received: paymentInfo?.received ?? transaction.received,
+          change: paymentInfo?.change ?? transaction.change,
+          isModified: true,
+          lastModified: new Date().toLocaleString()
+        };
+
+        setTransactions(prev =>
+          prev.map(t => t.id === transaction.id ? updatedTransaction : t)
+        );
+
+        playSound('cash');
+        closeModal();
       }
     });
   };
+
+  // 帶庫存回補的刪除訂單函數
+  const voidTransactionWithStockRestore = useCallback((id, items) => {
+    setModalConfig({
+      isOpen: true,
+      type: 'danger',
+      title: '刪除訂單',
+      message: '確定要刪除這筆紀錄嗎？系統將自動回補庫存並扣除當日營收。此操作無法復原。',
+      onCancel: closeModal,
+      onConfirm: () => {
+        // 回補庫存
+        const stockChanges = new Map();
+        items.forEach(item => {
+          if (!item.isCustom) {
+            stockChanges.set(item.id, (stockChanges.get(item.id) || 0) + item.qty);
+          }
+        });
+        applyStockChanges(stockChanges);
+
+        // 刪除交易
+        setTransactions(prev => prev.filter(t => t.id !== id));
+        playSound('clear');
+        closeModal();
+      }
+    });
+  }, [applyStockChanges]);
 
   const voidTransaction = (id) => {
     setModalConfig({
@@ -1012,23 +1326,31 @@ export default function App() {
       fileName = `POS_Orders_${scopeName}.csv`;
     } else {
       // 商品統計
-      const productStats = {};
+      // 1. 先從銷售紀錄中計算出有賣出的商品的統計數據
+      const salesStats = {};
       dataToExport.forEach(t => {
         t.items.forEach(item => {
-          if (!productStats[item.name]) {
-            productStats[item.name] = { qty: 0, revenue: 0, category: item.category || "未知" };
+          if (!salesStats[item.name]) {
+            salesStats[item.name] = { qty: 0, revenue: 0 };
           }
-          productStats[item.name].qty += item.qty;
-          productStats[item.name].revenue += (item.price * item.qty);
+          salesStats[item.name].qty += item.qty;
+          salesStats[item.name].revenue += (item.price * item.qty);
         });
       });
-      const headers = ["商品名稱", "分類", "銷售數量", "銷售總額"];
-      const rows = Object.keys(productStats).map(name => [
-        escapeCSV(name),
-        escapeCSV(productStats[name].category),
-        productStats[name].qty,
-        productStats[name].revenue
-      ]);
+
+      // 2. 以完整的商品清單 (products) 為基礎來建立每一列資料
+      const headers = ["商品名稱", "分類", "銷售數量", "銷售總額", "目前庫存"];
+      const rows = products.map(product => {
+        const stats = salesStats[product.name] || { qty: 0, revenue: 0 };
+        return [
+          escapeCSV(product.name),
+          escapeCSV(product.category),
+          stats.qty,
+          stats.revenue,
+          product.stock
+        ];
+      });
+
       csvContent += [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
       fileName = `POS_Products_${scopeName}.csv`;
     }
@@ -1077,7 +1399,11 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 text-gray-900 font-sans overflow-hidden relative text-lg">
-      <Modal {...modalConfig} />
+      <Modal
+        {...modalConfig}
+        editReceivedAmount={editReceivedAmount}
+        setEditReceivedAmount={setEditReceivedAmount}
+      />
       <input 
         type="file" 
         ref={fileInputRef} 
@@ -1087,6 +1413,11 @@ export default function App() {
       />
 
       <header className="flex-none h-20 bg-slate-900 text-white flex items-center justify-between px-6 shadow-md z-10">
+        {isDemoMode && (
+          <div className="absolute top-0 left-0 right-0 bg-yellow-500 text-slate-900 text-center font-black text-xl py-1 z-50 animate-bounce">
+            DEMO 模式已啟用 - 變更將不會永久保存
+          </div>
+        )}
         {/* Header Content */}
         <div className="flex items-center gap-3">
           <div className="bg-blue-600 p-2 rounded-xl"><Monitor size={28} className="text-white" /></div>
@@ -1273,7 +1604,7 @@ export default function App() {
                            <td className="px-8 py-6 text-center">
                              <div className="flex items-center justify-center gap-2">
                                <button onClick={() => handleEditTransaction(t)} className="text-orange-500 hover:bg-orange-50 p-3 rounded-lg border border-orange-200 hover:border-orange-300 font-bold flex items-center gap-1 transition-colors" title="修改訂單"><Edit3 size={20} /> 修改</button>
-                               <button onClick={() => voidTransaction(t.id)} className="text-red-500 hover:bg-red-50 p-3 rounded-lg border border-red-200 hover:border-red-300 font-bold flex items-center gap-1 transition-colors" title="刪除訂單"><Trash2 size={20} /> 刪除</button>
+                               <button onClick={() => voidTransactionWithStockRestore(t.id, t.items)} className="text-red-500 hover:bg-red-50 p-3 rounded-lg border border-red-200 hover:border-red-300 font-bold flex items-center gap-1 transition-colors" title="刪除訂單"><Trash2 size={20} /> 刪除</button>
                              </div>
                            </td>
                          </tr>
@@ -1320,6 +1651,22 @@ export default function App() {
                 </div>
                 <div className="p-8">
                   <input type="text" placeholder="請在此掃描任意條碼..." className="w-full p-6 text-3xl font-bold border-4 border-gray-300 rounded-2xl focus:border-green-500 focus:outline-none text-center text-gray-600" onKeyDown={(e) => { if (e.key === 'Enter') { playSound('beep'); alert(`掃描成功！內容：${e.target.value}`); e.target.value = ''; } }} />
+                </div>
+              </div>
+              <div className="bg-white rounded-3xl shadow-xl border-2 border-gray-200 overflow-hidden mb-8">
+                <div className="bg-gray-100 px-8 py-6 border-b-2 border-gray-200">
+                  <h3 className="text-2xl font-black text-gray-800 flex items-center gap-3"><Monitor size={28}/> Demo 模式設定</h3>
+                  <p className="text-gray-500 mt-2">啟用 Demo 模式將使用模擬資料，所有操作不會影響真實資料，適合測試用途。</p>
+                </div>
+                <div className="p-8 flex items-center justify-between">
+                  <div>
+                    <label htmlFor="demo-mode-toggle" className="text-2xl font-black text-gray-800 cursor-pointer">啟用 Demo 模式</label>
+                    <p className="text-gray-600 mt-1">切換到預設模擬資料，所有更改將是暫時性的。</p>
+                  </div>
+                  <label htmlFor="demo-mode-toggle" className="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="demo-mode-toggle" className="sr-only peer" checked={isDemoMode} onChange={handleToggleDemoMode} />
+                    <div className="w-20 h-10 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[4px] after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-8 after:w-8 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
                 </div>
               </div>
               <div className="bg-red-50 rounded-3xl shadow-xl border-2 border-red-200 overflow-hidden">
