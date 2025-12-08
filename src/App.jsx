@@ -36,6 +36,75 @@ import {
   FolderOpen // 新增圖示
 } from 'lucide-react';
 
+// --- 跨平台日期工具函數 ---
+const DateUtils = {
+  // 標準化日期為 YYYY-MM-DD 格式
+  formatDate: (date) => {
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  },
+
+  // 比較兩個日期是否為同一天（忽略時間）
+  isSameDay: (date1, date2) => {
+    return DateUtils.formatDate(date1) === DateUtils.formatDate(date2);
+  },
+
+  // 獲取今日日期字串
+  getTodayString: () => {
+    return DateUtils.formatDate(new Date());
+  },
+
+  // 解析時間字串（向後兼容）
+  parseTime: (timeStr) => {
+    try {
+      // 首先嘗試直接解析
+      let date = new Date(timeStr);
+      if (!isNaN(date.getTime())) {
+        return date;
+      }
+
+      // 如果是數字（timestamp），直接轉換
+      if (typeof timeStr === 'number' || !isNaN(Number(timeStr))) {
+        date = new Date(Number(timeStr));
+        if (!isNaN(date.getTime())) {
+          return date;
+        }
+      }
+
+      // 如果是字串，嘗試各種常見的本地化格式
+      if (typeof timeStr === 'string') {
+        // 移除可能的時區訊息和多餘空格
+        const cleanStr = timeStr.trim();
+
+        // 嘗試常見的分隔符替換
+        const formats = [
+          cleanStr,
+          cleanStr.replace(/[年月]/g, '/').replace(/[日時]/g, ' ').replace(/[分秒]/g, ':'),
+          cleanStr.replace(/\//g, '-'),
+          cleanStr.replace(/-/g, '/'),
+        ];
+
+        for (const format of formats) {
+          date = new Date(format);
+          if (!isNaN(date.getTime())) {
+            return date;
+          }
+        }
+      }
+
+      // 如果所有方法都失敗，回傳當前時間並警告
+      console.warn('日期解析失敗，使用當前時間作為備用:', timeStr);
+      return new Date();
+    } catch (e) {
+      console.warn('日期解析發生異常:', timeStr, e);
+      return new Date();
+    }
+  }
+};
+
 // --- MOCK DATA: 預設商品清單 ---
 const INITIAL_PRODUCTS = [
   { id: 101, name: "烤香腸", price: 35, category: "熱食", barcode: "101", stock: 100 },
@@ -87,7 +156,16 @@ const DEMO_TRANSACTIONS = (() => {
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
 
-  const formatTime = (date) => date.toLocaleString();
+  // 使用更標準的時間格式，但保持與 toLocaleString 的相容性
+  const formatTime = (date) => {
+    try {
+      // 優先使用 ISO 格式，但如果需要顯示本地化可以轉換
+      return date.toLocaleString();
+    } catch (e) {
+      // 備用方案：使用 ISO 格式
+      return date.toISOString();
+    }
+  };
 
   return [
     {
@@ -152,10 +230,77 @@ const STORAGE_KEYS = {
 const getLocalStorageItem = (key, defaultValue) => {
   try {
     const item = localStorage.getItem(key);
-    return item ? JSON.parse(item) : defaultValue;
+    if (!item) {
+      console.log(`📂 LocalStorage key "${key}" 不存在，使用預設值`);
+      return defaultValue;
+    }
+
+    const parsed = JSON.parse(item);
+
+    // 🔐 資料完整性檢查
+    if (key.includes('products') && Array.isArray(parsed)) {
+      const isValid = parsed.every(p =>
+        p && typeof p === 'object' &&
+        p.id && p.name && typeof p.price === 'number' && p.price >= 0 &&
+        p.category && typeof p.category === 'string' &&
+        typeof p.stock === 'number' && p.stock >= 0
+      );
+      if (!isValid) {
+        console.warn(`⚠️ LocalStorage 商品資料損毀，使用預設值: ${key}`);
+        return defaultValue;
+      }
+      console.log(`✅ LocalStorage 商品資料驗證通過: ${key} (${parsed.length} 筆)`);
+    }
+
+    if (key.includes('transactions') && Array.isArray(parsed)) {
+      const isValid = parsed.every(t =>
+        t && typeof t === 'object' &&
+        t.id && t.time && Array.isArray(t.items) &&
+        typeof t.total === 'number' && t.total >= 0
+      );
+      if (!isValid) {
+        console.warn(`⚠️ LocalStorage 交易資料損毀，使用預設值: ${key}`);
+        return defaultValue;
+      }
+      console.log(`✅ LocalStorage 交易資料驗證通過: ${key} (${parsed.length} 筆)`);
+    }
+
+    return parsed;
   } catch (error) {
-    console.error(`Error parsing localStorage key "${key}":`, error);
+    console.error(`❌ Error parsing localStorage key "${key}":`, error);
     return defaultValue;
+  }
+};
+
+// 🔐 安全的 localStorage 寫入函數
+const setLocalStorageItem = (key, value, onError = null) => {
+  try {
+    const jsonString = JSON.stringify(value);
+
+    // 檢查資料大小 (localStorage 通常限制 5-10MB)
+    const sizeInBytes = new Blob([jsonString]).size;
+    const sizeInMB = sizeInBytes / 1024 / 1024;
+
+    if (sizeInMB > 4) { // 4MB 警告閾值
+      console.warn(`LocalStorage 資料過大: ${key} (${sizeInMB.toFixed(2)}MB)`);
+    }
+
+    localStorage.setItem(key, jsonString);
+    return true;
+  } catch (error) {
+    console.error(`LocalStorage 寫入失敗 "${key}":`, error);
+
+    if (error.name === 'QuotaExceededError') {
+      console.error('LocalStorage 空間不足，嘗試清理舊資料...');
+      // 可選：實作自動清理機制
+    }
+
+    // 回調通知錯誤
+    if (onError) {
+      onError(error);
+    }
+
+    return false;
   }
 };
 
@@ -236,7 +381,7 @@ const Numpad = ({ onInput, onDelete, className = "" }) => {
 };
 
 // --- Modal Component ---
-const Modal = ({ 
+const Modal = ({
   isOpen,
   type,
   title,
@@ -251,7 +396,9 @@ const Modal = ({
   onExportAction = null, // 新增：專門給匯出選單用的 callback
   editReceivedAmount = '',
   setEditReceivedAmount = () => {},
-  originalTransaction = null
+  originalTransaction = null,
+  playSound = null, // 新增：音效播放函數
+  onStockWarning = null // 新增：庫存警告回調函數
 }) => {
   const [inputValues, setInputValues] = useState({});
   const [receivedAmount, setReceivedAmount] = useState('');
@@ -347,8 +494,54 @@ const Modal = ({
 
   const handleEditItemChange = (index, field, value) => {
     const newItems = [...currentEditItems];
-    newItems[index] = { ...newItems[index], [field]: value };
-    if (field === 'qty' && value < 1) newItems[index].qty = 1; 
+    const currentItem = newItems[index];
+
+    if (field === 'qty') {
+      // 🔐 庫存檢查邏輯 - 修改訂單時
+      if (!currentItem.isCustom) {
+        const product = allProducts.find(p => p.id === currentItem.id);
+
+        if (product) {
+          // 計算原訂單中此商品的數量（用於庫存釋放計算）
+          const originalItem = originalTransaction?.items?.find(i => i.id === currentItem.id);
+          const originalQty = originalItem ? originalItem.qty : 0;
+
+          // 目前可用庫存 = 商品庫存 + 原訂單中的數量（因為修改時會釋放）
+          const availableStock = product.stock + originalQty;
+
+          // 檢查新數量是否超過可用庫存
+          if (value > availableStock) {
+            // 播放錯誤音效
+            if (playSound) playSound('error');
+
+            // 使用最大可用數量
+            const maxAllowed = Math.max(1, availableStock);
+            newItems[index] = { ...currentItem, qty: maxAllowed };
+            setCurrentEditItems(newItems);
+
+            // 顯示用戶友善的警告訊息
+            if (onStockWarning) {
+              onStockWarning({
+                productName: currentItem.name,
+                requestedQty: value,
+                availableStock: availableStock,
+                adjustedQty: maxAllowed
+              });
+            }
+
+            return;
+          }
+        }
+      }
+
+      // 確保最小數量為 1
+      const finalValue = Math.max(1, parseInt(value) || 1);
+      newItems[index] = { ...currentItem, qty: finalValue };
+    } else {
+      // 處理其他欄位（如價格）
+      newItems[index] = { ...currentItem, [field]: value };
+    }
+
     setCurrentEditItems(newItems);
   };
 
@@ -361,8 +554,42 @@ const Modal = ({
     if (!selectedProductId) return;
     const productToAdd = allProducts.find(p => p.id === parseInt(selectedProductId));
     if (!productToAdd) return;
+
+    // 🔐 庫存檢查 - 新增商品到編輯清單
+    if (!productToAdd.isCustom) {
+      // 計算原訂單中此商品的數量
+      const originalItem = originalTransaction?.items?.find(i => i.id === productToAdd.id);
+      const originalQty = originalItem ? originalItem.qty : 0;
+
+      // 計算目前編輯清單中的數量
+      const currentEditItem = currentEditItems.find(i => i.id === productToAdd.id);
+      const currentEditQty = currentEditItem ? currentEditItem.qty : 0;
+
+      // 可用庫存 = 商品庫存 + 原訂單數量 - 目前編輯清單數量
+      const availableStock = productToAdd.stock + originalQty - currentEditQty;
+
+      if (availableStock <= 0) {
+        // 播放錯誤音效
+        if (playSound) playSound('error');
+
+        // 顯示用戶友善的警告訊息
+        if (onStockWarning) {
+          onStockWarning({
+            productName: productToAdd.name,
+            requestedQty: 1,
+            availableStock: availableStock,
+            adjustedQty: 0,
+            isAddingNew: true
+          });
+        }
+
+        return; // 不允許加入
+      }
+    }
+
     const newItems = [...currentEditItems];
     const existingIndex = newItems.findIndex(i => i.id === productToAdd.id);
+
     if (existingIndex >= 0) {
       newItems[existingIndex].qty += 1;
     } else {
@@ -374,6 +601,7 @@ const Modal = ({
         qty: 1
       });
     }
+
     setCurrentEditItems(newItems);
     setSelectedProductId('');
   };
@@ -761,11 +989,12 @@ export default function App() {
   const [currentView, setCurrentView] = useState('pos');
   
   // STATE: 讀取 LocalStorage 或使用預設值
-  const [products, setProducts] = useState([]);
-  const [transactions, setTransactions] = useState([]);
+  const [products, setProducts] = useState(null); // null 表示未載入，防止競爭條件
+  const [transactions, setTransactions] = useState(null); // null 表示未載入，防止競爭條件
   const [settings, setSettings] = useState(() => getLocalStorageItem(STORAGE_KEYS.SETTINGS, { barcodeFormat: 'CODE39' }));
   const [importedSnapshot, setImportedSnapshot] = useState([]);
   const [isDemoMode, setIsDemoMode] = useState(() => getLocalStorageItem(STORAGE_KEYS.IS_DEMO_MODE, false));
+  const [isDataLoaded, setIsDataLoaded] = useState(false); // 新增：資料載入狀態管理
 
   const [cart, setCart] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("全部");
@@ -773,6 +1002,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [lastSound, setLastSound] = useState(null);
   const [modalConfig, setModalConfig] = useState({ isOpen: false });
+  const [historyViewMode, setHistoryViewMode] = useState('today'); // 銷售紀錄顯示模式：今日/全部
 
   // 編輯訂單時的付款狀態
   const [editReceivedAmount, setEditReceivedAmount] = useState('');
@@ -780,16 +1010,49 @@ export default function App() {
   const fileInputRef = useRef(null);
   const lastScanTimeRef = useRef(0);
 
-  // 計算動態分類
+  // 🔐 安全計算動態分類
   const dynamicCategories = useMemo(() => {
-    const cats = new Set(products.map(p => p.category));
-    return ["全部", ...Array.from(cats)];
+    try {
+      // 類型安全檢查 - 處理 null 狀態（載入中）
+      if (!products || !Array.isArray(products) || products.length === 0) {
+        return ["全部"];
+      }
+
+      // 安全提取分類，過濾無效值
+      const validCategories = products
+        .map(p => {
+          // 確保產品物件存在且有分類
+          if (!p || typeof p !== 'object' || !p.category || typeof p.category !== 'string') {
+            return null;
+          }
+          // 清理分類名稱
+          return p.category.trim();
+        })
+        .filter(Boolean); // 移除空值
+
+      // 建立唯一分類集合
+      const cats = new Set(validCategories);
+
+      // 限制分類數量防止 UI 過載
+      const categoriesArray = Array.from(cats);
+      if (categoriesArray.length > 20) {
+        console.warn('分類數量過多，可能影響效能:', categoriesArray.length);
+      }
+
+      return ["全部", ...categoriesArray.slice(0, 20)]; // 最多20個分類
+    } catch (error) {
+      console.error('計算動態分類時發生錯誤:', error);
+      return ["全部"]; // 安全備用值
+    }
   }, [products]);
 
   const currentFormat = BARCODE_FORMATS.find(f => f.id === settings.barcodeFormat) || BARCODE_FORMATS[0];
 
   // --- Helper function to load data based on demo mode ---
   const loadData = useCallback((demoMode) => {
+    console.log('🔄 開始載入資料，模式:', demoMode ? 'Demo' : '正常');
+    setIsDataLoaded(false); // 開始載入，停止自動存檔防止競爭條件
+
     if (demoMode) {
       const demoProducts = getLocalStorageItem(STORAGE_KEYS.PRODUCTS_DEMO, DEMO_PRODUCTS);
       setProducts(demoProducts !== null && demoProducts.length > 0 ? demoProducts : DEMO_PRODUCTS);
@@ -803,10 +1066,16 @@ export default function App() {
       // Otherwise, load what's saved.
       const savedProducts = getLocalStorageItem(STORAGE_KEYS.PRODUCTS, null); // Use null as default for checking existence
       setProducts(savedProducts !== null && savedProducts.length > 0 ? savedProducts : INITIAL_PRODUCTS);
-      
+
       setTransactions(getLocalStorageItem(STORAGE_KEYS.TRANSACTIONS, []));
       setImportedSnapshot(getLocalStorageItem(STORAGE_KEYS.IMPORTED_SNAPSHOT, []));
     }
+
+    // 載入完成，重新啟用自動存檔
+    setTimeout(() => {
+      setIsDataLoaded(true);
+      console.log('✅ 資料載入完成，自動存檔已啟用');
+    }, 100); // 短暫延遲確保所有狀態更新完成
   }, []); // dependencies: none because we use getLocalStorageItem and specific constants
 
   // --- 庫存自動化管理函數 ---
@@ -850,21 +1119,53 @@ export default function App() {
     loadData(isDemoMode);
   }, [isDemoMode, loadData]); // Re-run when isDemoMode changes
 
-  // EFFECT: 自動存檔
+  // EFFECT: 安全自動存檔 - Products
   useEffect(() => {
-    localStorage.setItem(isDemoMode ? STORAGE_KEYS.PRODUCTS_DEMO : STORAGE_KEYS.PRODUCTS, JSON.stringify(products));
-  }, [products, isDemoMode]);
+    // 🔐 只在資料載入完成且有有效資料時才存檔，防止競爭條件
+    if (!isDataLoaded || !products) {
+      console.log('⏸️ 跳過 products 存檔：載入狀態=', isDataLoaded, '資料狀態=', products ? '有資料' : 'null');
+      return;
+    }
+
+    const key = isDemoMode ? STORAGE_KEYS.PRODUCTS_DEMO : STORAGE_KEYS.PRODUCTS;
+    console.log('💾 正在存檔 products 到', key, '資料筆數:', products.length);
+    setLocalStorageItem(key, products, (error) => {
+      console.error('商品資料存檔失敗:', error);
+      // 可選：通知用戶存檔失敗
+    });
+  }, [products, isDemoMode, isDataLoaded]);
+
+  // EFFECT: 安全自動存檔 - Transactions
   useEffect(() => {
-    localStorage.setItem(isDemoMode ? STORAGE_KEYS.TRANSACTIONS_DEMO : STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
-  }, [transactions, isDemoMode]);
+    // 🔐 只在資料載入完成且有有效資料時才存檔，防止競爭條件
+    if (!isDataLoaded || !transactions) {
+      console.log('⏸️ 跳過 transactions 存檔：載入狀態=', isDataLoaded, '資料狀態=', transactions ? '有資料' : 'null');
+      return;
+    }
+
+    const key = isDemoMode ? STORAGE_KEYS.TRANSACTIONS_DEMO : STORAGE_KEYS.TRANSACTIONS;
+    console.log('💾 正在存檔 transactions 到', key, '資料筆數:', transactions.length);
+    setLocalStorageItem(key, transactions, (error) => {
+      console.error('交易記錄存檔失敗:', error);
+    });
+  }, [transactions, isDemoMode, isDataLoaded]);
+
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings)); // Settings always saves to real key
+    setLocalStorageItem(STORAGE_KEYS.SETTINGS, settings, (error) => {
+      console.error('設定存檔失敗:', error);
+    });
   }, [settings]);
+
   useEffect(() => {
-    localStorage.setItem(isDemoMode ? STORAGE_KEYS.IMPORTED_SNAPSHOT_DEMO : STORAGE_KEYS.IMPORTED_SNAPSHOT, JSON.stringify(importedSnapshot));
+    const key = isDemoMode ? STORAGE_KEYS.IMPORTED_SNAPSHOT_DEMO : STORAGE_KEYS.IMPORTED_SNAPSHOT;
+    setLocalStorageItem(key, importedSnapshot, (error) => {
+      console.error('匯入快照存檔失敗:', error);
+    });
   }, [importedSnapshot, isDemoMode]);
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.IS_DEMO_MODE, JSON.stringify(isDemoMode));
+    setLocalStorageItem(STORAGE_KEYS.IS_DEMO_MODE, isDemoMode, (error) => {
+      console.error('Demo模式設定存檔失敗:', error);
+    });
   }, [isDemoMode]);
 
   // --- 計算邏輯 ---
@@ -873,15 +1174,65 @@ export default function App() {
   }, [cart]);
 
   const todayTotal = useMemo(() => {
-    const todayStr = new Date().toDateString(); 
+    if (!transactions || !Array.isArray(transactions)) {
+      return 0; // 如果 transactions 為 null（載入中），返回 0
+    }
+
+    const todayStr = DateUtils.getTodayString();
     return transactions.reduce((acc, t) => {
-      const transactionDate = new Date(t.id).toDateString();
-      if (transactionDate === todayStr) {
+      const transactionDate = DateUtils.parseTime(t.time);
+      if (DateUtils.formatDate(transactionDate) === todayStr) {
         return acc + t.total;
       }
       return acc;
     }, 0);
   }, [transactions]);
+
+  // 銷售紀錄篩選邏輯
+  const filteredTransactions = useMemo(() => {
+    if (!transactions || !Array.isArray(transactions)) return [];
+
+    if (historyViewMode === 'today') {
+      const todayStr = DateUtils.getTodayString();
+      const filtered = transactions.filter(t => {
+        const transactionDate = DateUtils.parseTime(t.time);
+        const formattedDate = DateUtils.formatDate(transactionDate);
+        return formattedDate === todayStr;
+      });
+
+      // 添加調試信息 (可選 - 生產環境可移除)
+      if (process.env.NODE_ENV === 'development') {
+        const debugInfo = {
+          todayStr,
+          totalTransactions: transactions.length,
+          todayTransactions: filtered.length,
+          userAgent: navigator.userAgent,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          transactionDetails: transactions.slice(0, 3).map(t => ({
+            originalTime: t.time,
+            parsedDate: DateUtils.parseTime(t.time),
+            formattedDate: DateUtils.formatDate(DateUtils.parseTime(t.time)),
+            matchesToday: DateUtils.formatDate(DateUtils.parseTime(t.time)) === todayStr
+          }))
+        };
+        console.log('Debug - Date Filtering:', debugInfo);
+      }
+
+      return filtered;
+    }
+
+    return transactions;
+  }, [transactions, historyViewMode]);
+
+  // 動態營收計算
+  const displayedRevenue = useMemo(() => {
+    if (historyViewMode === 'today') {
+      return todayTotal; // 使用現有的今日營收計算
+    }
+
+    // 計算全部營收
+    return filteredTransactions.reduce((acc, t) => acc + t.total, 0);
+  }, [historyViewMode, todayTotal, filteredTransactions]);
 
   const playSound = (type) => {
     setLastSound(type);
@@ -894,6 +1245,35 @@ export default function App() {
     setTimeout(() => barcodeInputRef.current?.focus(), 100);
   };
 
+  // 🔔 庫存警告專用關閉函數（不會離開修改訂單頁面）
+  const closeStockWarningModal = () => {
+    setModalConfig({ ...modalConfig, isOpen: false });
+    // 注意：不重新聚焦條碼輸入欄，保持在修改訂單頁面
+  };
+
+  // 🔔 庫存不足警告處理函數
+  const handleStockWarning = (warningInfo) => {
+    const { productName, requestedQty, availableStock, adjustedQty, isAddingNew } = warningInfo;
+
+    let message = '';
+    if (isAddingNew) {
+      message = `無法新增「${productName}」到訂單中。\n\n目前可用庫存：${availableStock} 個\n您嘗試新增：${requestedQty} 個\n\n請先調整其他商品數量或增加庫存。`;
+    } else if (availableStock <= 0) {
+      message = `「${productName}」庫存不足！\n\n目前可用庫存：${availableStock} 個\n您嘗試設定：${requestedQty} 個\n已自動調整為：${adjustedQty} 個\n\n提醒：修改訂單時，原訂單數量會暫時釋放供重新分配。`;
+    } else {
+      message = `「${productName}」庫存數量不足！\n\n目前可用庫存：${availableStock} 個\n您嘗試設定：${requestedQty} 個\n已自動調整為：${adjustedQty} 個\n\n提醒：修改訂單時，原訂單數量會暫時釋放供重新分配。`;
+    }
+
+    setModalConfig({
+      isOpen: true,
+      type: 'warning',
+      title: '庫存數量限制',
+      message: message,
+      onConfirm: closeStockWarningModal, // 使用專門的關閉函數
+      autoCloseDelay: 4000 // 4秒後自動關閉
+    });
+  };
+
   const handleToggleDemoMode = () => {
     if (isDemoMode) {
       setModalConfig({
@@ -903,7 +1283,9 @@ export default function App() {
         message: '您確定要退出 Demo 模式嗎？應用程式將重新載入真實資料。Demo 模式中的所有變更將不會保留在真實資料中。',
         onCancel: closeModal,
         onConfirm: () => {
-          setIsDemoMode(false);
+          console.log('🔄 切換至正常模式');
+          setIsDataLoaded(false); // 🔐 暫停自動存檔防止競爭條件
+          setIsDemoMode(false);   // 觸發模式切換和資料重新載入
           closeModal();
         }
       });
@@ -915,7 +1297,9 @@ export default function App() {
         message: '您確定要進入 Demo 模式嗎？所有操作將使用模擬資料，且變更不會影響真實資料。',
         onCancel: closeModal,
         onConfirm: () => {
-          setIsDemoMode(true);
+          console.log('🔄 切換至 Demo 模式');
+          setIsDataLoaded(false); // 🔐 暫停自動存檔防止競爭條件
+          setIsDemoMode(true);    // 觸發模式切換和資料重新載入
           closeModal();
         }
       });
@@ -984,6 +1368,36 @@ export default function App() {
   const handleImportCSV = (event) => {
     const file = event.target.files[0];
     if (!file) return;
+
+    // 🔐 安全檢查 1: 檔案大小限制 (1MB)
+    const MAX_FILE_SIZE = 1024 * 1024; // 1MB
+    if (file.size > MAX_FILE_SIZE) {
+      playSound('error');
+      setModalConfig({
+        isOpen: true,
+        type: 'danger',
+        title: '檔案過大',
+        message: `檔案大小超過限制 (${(file.size / 1024 / 1024).toFixed(2)}MB > 1MB)\n請使用小於 1MB 的 CSV 檔案。`,
+        onConfirm: closeModal
+      });
+      event.target.value = '';
+      return;
+    }
+
+    // 🔐 安全檢查 2: 檔案類型驗證
+    if (!file.name.toLowerCase().endsWith('.csv') && file.type !== 'text/csv') {
+      playSound('error');
+      setModalConfig({
+        isOpen: true,
+        type: 'danger',
+        title: '檔案格式錯誤',
+        message: '請選擇 CSV 格式的檔案 (.csv)',
+        onConfirm: closeModal
+      });
+      event.target.value = '';
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
@@ -1003,15 +1417,75 @@ export default function App() {
         const rows = text.split(/\r\n|\n/).filter(row => row.trim() !== '');
         const dataRows = rows.slice(1);
         if (dataRows.length === 0) throw new Error("CSV 檔案內容為空");
+
+        // 🔐 安全檢查 3: 限制匯入數量
+        const MAX_PRODUCTS = 1000;
+        if (dataRows.length > MAX_PRODUCTS) {
+          throw new Error(`商品數量過多 (${dataRows.length} > ${MAX_PRODUCTS})，請分批匯入`);
+        }
+
+        // 🔐 資料驗證和清理函數
+        const sanitizeString = (str) => {
+          if (!str || typeof str !== 'string') return '';
+          // 移除潛在的 HTML 標籤和特殊字符
+          return str.trim().replace(/<[^>]*>?/gm, '').substring(0, 100);
+        };
+
+        const validateAndParseNumber = (value, fieldName, min = 0, max = 999999) => {
+          const num = parseInt(value);
+          if (isNaN(num) || num < min || num > max) {
+            throw new Error(`${fieldName} 數值無效: ${value} (應在 ${min}-${max} 之間)`);
+          }
+          return num;
+        };
+
+        const validationErrors = [];
         const newProducts = dataRows.map((row, index) => {
-          const cols = row.split(',');
-          const name = cols[0]?.trim() || `未命名商品 ${index+1}`;
-          const price = parseInt(cols[1]) || 0;
-          const category = cols[2]?.trim() || "其他";
-          const barcode = cols[3]?.trim() || "";
-          const stock = parseInt(cols[4]) || 0;
-          return { id: Date.now() + index, name, price, category, barcode, stock, isCustom: false };
-        });
+          try {
+            const cols = row.split(',');
+
+            // 驗證欄位數量
+            if (cols.length < 5) {
+              throw new Error(`第 ${index + 2} 行欄位不足 (需要5欄，實際${cols.length}欄)`);
+            }
+
+            // 清理和驗證資料
+            const name = sanitizeString(cols[0]) || `未命名商品 ${index + 1}`;
+            const price = validateAndParseNumber(cols[1], `第 ${index + 2} 行價格`, 0, 99999);
+            const category = sanitizeString(cols[2]) || "其他";
+            const barcode = sanitizeString(cols[3]);
+            const stock = validateAndParseNumber(cols[4], `第 ${index + 2} 行庫存`, 0, 99999);
+
+            // 驗證商品名稱長度
+            if (name.length < 1 || name.length > 50) {
+              throw new Error(`第 ${index + 2} 行商品名稱長度無效 (1-50字符)`);
+            }
+
+            return {
+              id: Date.now() + index,
+              name,
+              price,
+              category,
+              barcode,
+              stock,
+              isCustom: false
+            };
+          } catch (error) {
+            validationErrors.push(error.message);
+            return null;
+          }
+        }).filter(product => product !== null);
+
+        // 檢查驗證錯誤
+        if (validationErrors.length > 0) {
+          const errorMessage = validationErrors.slice(0, 5).join('\n') +
+            (validationErrors.length > 5 ? `\n...及其他 ${validationErrors.length - 5} 個錯誤` : '');
+          throw new Error(`資料驗證失敗:\n${errorMessage}`);
+        }
+
+        if (newProducts.length === 0) {
+          throw new Error("無有效的商品資料可匯入");
+        }
         setModalConfig({
           isOpen: true,
           type: 'danger',
@@ -1143,18 +1617,77 @@ export default function App() {
     setModalConfig({
       isOpen: true, type: 'payment', title: '結帳確認', paymentInfo: { total: cartTotal }, onCancel: closeModal,
       onConfirm: (paymentResult) => {
-        const newTransaction = {
-          id: Date.now(), time: new Date().toLocaleString(), items: [...cart], total: cartTotal, received: paymentResult.received, change: paymentResult.change, status: 'completed'
-        };
-        setTransactions(prev => [newTransaction, ...prev]);
-        setProducts(prevProducts => prevProducts.map(product => {
-          const cartItem = cart.find(c => c.id === product.id);
-          if (cartItem && !product.isCustom) {
-            return { ...product, stock: Math.max(0, product.stock - cartItem.qty) };
+        try {
+          // 🔐 交易完整性檢查：預先驗證庫存
+          const stockValidationErrors = [];
+          cart.forEach(cartItem => {
+            if (!cartItem.isCustom) {
+              const product = products.find(p => p.id === cartItem.id);
+              if (!product || product.stock < cartItem.qty) {
+                stockValidationErrors.push(`${cartItem.name} 庫存不足 (需要:${cartItem.qty}, 可用:${product?.stock || 0})`);
+              }
+            }
+          });
+
+          if (stockValidationErrors.length > 0) {
+            throw new Error(`庫存驗證失敗:\n${stockValidationErrors.join('\n')}`);
           }
-          return product;
-        }));
-        setCart([]); playSound('cash'); closeModal();
+
+          // 🔐 建立交易記錄 (使用更安全的 ID 生成)
+          const transactionId = Date.now() + Math.random().toString(36).substr(2, 9);
+          const newTransaction = {
+            id: transactionId,
+            time: new Date().toLocaleString(),
+            items: [...cart],
+            total: cartTotal,
+            received: paymentResult.received,
+            change: paymentResult.change,
+            status: 'completed'
+          };
+
+          // 🔐 原子性操作：先備份當前狀態
+          const currentProducts = [...products];
+          const currentTransactions = [...transactions];
+
+          try {
+            // 第一步：更新交易記錄
+            setTransactions(prev => [newTransaction, ...prev]);
+
+            // 第二步：更新庫存
+            setProducts(prevProducts => prevProducts.map(product => {
+              const cartItem = cart.find(c => c.id === product.id);
+              if (cartItem && !product.isCustom) {
+                const newStock = Math.max(0, product.stock - cartItem.qty);
+                return { ...product, stock: newStock };
+              }
+              return product;
+            }));
+
+            // 成功完成所有更新
+            setCart([]);
+            playSound('cash');
+            closeModal();
+          } catch (updateError) {
+            console.error('更新狀態失敗，進行回滾:', updateError);
+
+            // 回滾到原始狀態
+            setProducts(currentProducts);
+            setTransactions(currentTransactions);
+
+            throw new Error('結帳處理失敗，已回滾所有變更');
+          }
+
+        } catch (error) {
+          console.error('結帳失敗:', error);
+          playSound('error');
+          setModalConfig({
+            isOpen: true,
+            type: 'danger',
+            title: '結帳失敗',
+            message: `結帳處理時發生錯誤：\n${error.message}\n\n請重新嘗試或聯繫技術支援。`,
+            onConfirm: closeModal
+          });
+        }
       }
     });
   };
@@ -1286,11 +1819,14 @@ export default function App() {
 
   // --- 核心匯出邏輯 (Data Processing) ---
   const exportData = (dataType, scope) => {
-    const todayStr = new Date().toDateString();
-    
+    const todayStr = DateUtils.getTodayString();
+
     // 1. 篩選資料範圍
-    const dataToExport = scope === 'today' 
-      ? transactions.filter(t => new Date(t.id).toDateString() === todayStr)
+    const dataToExport = scope === 'today'
+      ? transactions.filter(t => {
+          const transactionDate = DateUtils.parseTime(t.time);
+          return DateUtils.formatDate(transactionDate) === todayStr;
+        })
       : transactions;
 
     if (dataToExport.length === 0) {
@@ -1381,11 +1917,11 @@ export default function App() {
     });
   };
 
-  const filteredProducts = products.filter(p => {
+  const filteredProducts = products ? products.filter(p => {
     const matchCat = selectedCategory === "全部" || p.category === selectedCategory;
     const matchSearch = p.name.includes(searchQuery) || p.barcode.includes(searchQuery);
     return matchCat && matchSearch;
-  });
+  }) : []; // 如果 products 為 null（載入中），返回空陣列
 
   const getCategoryColor = (cat) => {
     switch(cat) {
@@ -1403,6 +1939,8 @@ export default function App() {
         {...modalConfig}
         editReceivedAmount={editReceivedAmount}
         setEditReceivedAmount={setEditReceivedAmount}
+        playSound={playSound}
+        onStockWarning={handleStockWarning}
       />
       <input 
         type="file" 
@@ -1566,14 +2104,56 @@ export default function App() {
           <div className="flex-1 bg-white p-8 overflow-y-auto">
              <div className="max-w-6xl mx-auto">
                <div className="flex justify-between items-center mb-8">
-                 <h2 className="text-3xl font-black text-gray-800 flex items-center gap-3"><History className="text-blue-600" size={36} />本日銷售紀錄</h2>
+                 <div className="flex items-center gap-6">
+                   <h2 className="text-3xl font-black text-gray-800 flex items-center gap-3">
+                     <History className="text-blue-600" size={36} />
+                     {historyViewMode === 'today' ? '本日銷售紀錄' : '完整銷售紀錄'}
+                   </h2>
+
+                   {/* 今日/全部切換按鈕組 */}
+                   <div className="flex bg-gray-100 rounded-xl p-1 border-2 border-gray-200">
+                     <button
+                       onClick={() => setHistoryViewMode('today')}
+                       className={`px-4 py-2 rounded-lg font-bold text-lg transition-all ${
+                         historyViewMode === 'today'
+                           ? 'bg-blue-600 text-white shadow-md'
+                           : 'text-gray-600 hover:bg-gray-200'
+                       }`}
+                     >
+                       今日
+                     </button>
+                     <button
+                       onClick={() => setHistoryViewMode('all')}
+                       className={`px-4 py-2 rounded-lg font-bold text-lg transition-all ${
+                         historyViewMode === 'all'
+                           ? 'bg-blue-600 text-white shadow-md'
+                           : 'text-gray-600 hover:bg-gray-200'
+                       }`}
+                     >
+                       全部
+                     </button>
+                   </div>
+                 </div>
+
                  <div className="flex gap-4 items-center">
                     <button onClick={handleOpenExportMenu} className="flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl shadow-lg font-bold text-xl transition-colors"><FolderOpen size={24} /> 匯出報表選單</button>
-                    <div className="bg-blue-50 px-6 py-4 rounded-xl border-2 border-blue-200 shadow-sm ml-4"><span className="text-blue-700 font-bold text-xl">今日總營收：</span><span className="text-4xl font-black text-blue-900 ml-2">${todayTotal.toLocaleString()}</span></div>
+                    <div className="bg-blue-50 px-6 py-4 rounded-xl border-2 border-blue-200 shadow-sm ml-4">
+                      <span className="text-blue-700 font-bold text-xl">
+                        {historyViewMode === 'today' ? '今日總營收：' : '總營收：'}
+                      </span>
+                      <span className="text-4xl font-black text-blue-900 ml-2">
+                        ${displayedRevenue.toLocaleString()}
+                      </span>
+                    </div>
                  </div>
                </div>
-               {transactions.length === 0 ? (
-                 <div className="text-center py-32 bg-gray-50 rounded-3xl border-4 border-dashed border-gray-300"><AlertCircle className="mx-auto text-gray-300 mb-4" size={80} /><p className="text-3xl font-bold text-gray-400">目前尚無交易資料</p></div>
+               {filteredTransactions.length === 0 ? (
+                 <div className="text-center py-32 bg-gray-50 rounded-3xl border-4 border-dashed border-gray-300">
+                   <AlertCircle className="mx-auto text-gray-300 mb-4" size={80} />
+                   <p className="text-3xl font-bold text-gray-400">
+                     {historyViewMode === 'today' ? '今日尚無交易資料' : '目前尚無交易資料'}
+                   </p>
+                 </div>
                ) : (
                  <div className="bg-white rounded-2xl shadow-lg border-2 border-gray-200 overflow-hidden">
                    <table className="w-full text-left">
@@ -1588,9 +2168,12 @@ export default function App() {
                        </tr>
                      </thead>
                      <tbody className="divide-y-2 divide-gray-100 text-lg">
-                       {transactions.map(t => (
+                       {filteredTransactions.map(t => (
                          <tr key={t.id} className="hover:bg-blue-50 transition-colors">
-                           <td className="px-8 py-6 text-gray-700 font-bold">{t.time.split(' ')[1] || t.time}</td>
+                           <td className="px-8 py-6 text-gray-700 font-bold">
+                            <div className="text-lg font-bold">{t.time.split(' ')[1] || t.time}</div>
+                            <div className="text-sm text-gray-500 font-normal">{t.time.split(' ')[0] || new Date(t.time).toLocaleDateString()}</div>
+                          </td>
                            <td className="px-8 py-6">
                              <div className="font-bold text-gray-900 mb-1">{t.items.length} 項商品</div>
                              <div className="text-base text-gray-500 truncate max-w-md">{t.items.map(i => i.name).join(', ')}</div>
