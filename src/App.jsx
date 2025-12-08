@@ -1303,6 +1303,33 @@ export default function App() {
     });
   };
 
+  // 🔧 重置 Demo 資料函數
+  const handleResetDemoData = () => {
+    setModalConfig({
+      isOpen: true,
+      type: 'danger',
+      title: '重置 Demo 資料',
+      message: '這將會清空所有 Demo 模式的變更，恢復為原始的示範資料。\n\n包含：\n• 恢復原始交易紀錄\n• 恢復原始商品庫存\n• 清除所有修改歷史\n\n確定要執行嗎？',
+      onCancel: closeModal,
+      onConfirm: () => {
+        // 清除 Demo 模式的 localStorage 資料
+        localStorage.removeItem(STORAGE_KEYS.PRODUCTS_DEMO);
+        localStorage.removeItem(STORAGE_KEYS.TRANSACTIONS_DEMO);
+        localStorage.removeItem(STORAGE_KEYS.IMPORTED_SNAPSHOT_DEMO);
+
+        // 重新載入 Demo 資料
+        if (isDemoMode) {
+          console.log('🔄 重置 Demo 資料並重新載入');
+          setIsDataLoaded(false);
+          loadData(true); // 重新載入 Demo 資料
+        }
+
+        playSound('cash');
+        closeModal();
+      }
+    });
+  };
+
   const handleToggleDemoMode = () => {
     if (isDemoMode) {
       setModalConfig({
@@ -2281,15 +2308,40 @@ export default function App() {
                   <h3 className="text-2xl font-black text-gray-800 flex items-center gap-3"><Monitor size={28}/> Demo 模式設定</h3>
                   <p className="text-gray-500 mt-2">啟用 Demo 模式將使用模擬資料，所有操作不會影響真實資料，適合測試用途。</p>
                 </div>
-                <div className="p-8 flex items-center justify-between">
-                  <div>
-                    <label htmlFor="demo-mode-toggle" className="text-2xl font-black text-gray-800 cursor-pointer">啟用 Demo 模式</label>
-                    <p className="text-gray-600 mt-1">切換到預設模擬資料，所有更改將是暫時性的。</p>
+                <div className="p-8">
+                  {/* Demo 模式開關 */}
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <label htmlFor="demo-mode-toggle" className="text-2xl font-black text-gray-800 cursor-pointer">啟用 Demo 模式</label>
+                      <p className="text-gray-600 mt-1">切換到預設模擬資料，所有更改將是暫時性的。</p>
+                    </div>
+                    <label htmlFor="demo-mode-toggle" className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" id="demo-mode-toggle" className="sr-only peer" checked={isDemoMode} onChange={handleToggleDemoMode} />
+                      <div className="w-20 h-10 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[4px] after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-8 after:w-8 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
                   </div>
-                  <label htmlFor="demo-mode-toggle" className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" id="demo-mode-toggle" className="sr-only peer" checked={isDemoMode} onChange={handleToggleDemoMode} />
-                    <div className="w-20 h-10 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[4px] after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-8 after:w-8 after:transition-all peer-checked:bg-blue-600"></div>
-                  </label>
+
+                  {/* Demo 資料管理 */}
+                  {isDemoMode && (
+                    <div className="bg-orange-50 rounded-2xl p-6 border-2 border-orange-200">
+                      <div className="flex items-center gap-3 mb-4">
+                        <RefreshCw className="text-orange-600" size={24} />
+                        <h4 className="text-xl font-black text-orange-800">Demo 資料管理</h4>
+                      </div>
+                      <p className="text-orange-700 mb-4 font-medium">
+                        如果您在 Demo 模式中刪除了交易或修改了庫存，可以使用下方按鈕恢復為原始的示範資料。
+                      </p>
+                      <button
+                        onClick={handleResetDemoData}
+                        className="w-full py-4 rounded-xl bg-orange-500 text-white font-black text-xl shadow-lg hover:bg-orange-600 active:scale-95 transition-all flex items-center justify-center gap-3"
+                      >
+                        <RotateCcw size={24} /> 🔄 重置為原始 Demo 資料
+                      </button>
+                      <p className="text-center text-orange-600 mt-3 text-sm font-bold">
+                        這將恢復所有原始的交易紀錄和商品庫存
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="bg-red-50 rounded-3xl shadow-xl border-2 border-red-200 overflow-hidden">
