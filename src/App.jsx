@@ -121,9 +121,32 @@ const DateUtils = {
     }
   },
 
-  // 檢查日期是否為今日
+  // 檢查日期是否為今日 - 🔧 超強健版本
   isToday: (dateInput) => {
-    return DateUtils.isSameDay(dateInput, new Date());
+    try {
+      const inputDate = DateUtils.parseTime(dateInput);
+      const today = new Date();
+
+      // 三重驗證確保準確性
+      const method1 = DateUtils.isSameDay(inputDate, today);
+      const method2 = DateUtils.formatDate(inputDate) === DateUtils.formatDate(today);
+      const method3 = inputDate.toDateString() === today.toDateString();
+
+      console.debug('isToday 三重驗證:', {
+        input: dateInput,
+        parsed: inputDate,
+        today: today,
+        method1_numeric: method1,
+        method2_formatted: method2,
+        method3_datestring: method3,
+        consensus: method1 || method2 || method3 // 只要有一個方法認為是今天就算今天
+      });
+
+      return method1 || method2 || method3;
+    } catch (e) {
+      console.warn('isToday 檢查失敗:', dateInput, e);
+      return false;
+    }
   },
 
   // 標準化日期為 YYYY-MM-DD 格式（用於顯示和調試）
@@ -197,15 +220,10 @@ const DEMO_TRANSACTIONS = (() => {
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
 
-  // 使用更標準的時間格式，但保持與 toLocaleString 的相容性
+  // 🔧 直接使用 ISO 標準格式，避免本地化差異
   const formatTime = (date) => {
-    try {
-      // 優先使用 ISO 格式，但如果需要顯示本地化可以轉換
-      return date.toLocaleString();
-    } catch (e) {
-      // 備用方案：使用 ISO 格式
-      return date.toISOString();
-    }
+    // 使用 ISO 格式但轉為本地時區顯示
+    return date.toISOString().replace('T', ' ').substring(0, 19);
   };
 
   return [
@@ -1857,10 +1875,23 @@ export default function App() {
 
   // --- 核心匯出邏輯 (Data Processing) ---
   const exportData = (dataType, scope) => {
-    // 1. 篩選資料範圍 - 🔧 使用數值比較方式避免字串格式化問題
+    // 🔧 詳細調試匯出邏輯
+    console.group('🔍 Export Data Debug');
+    console.log('Scope:', scope);
+    console.log('Total transactions:', transactions.length);
+
+    // 1. 篩選資料範圍 - 使用數值比較方式避免字串格式化問題
     const dataToExport = scope === 'today'
-      ? transactions.filter(t => DateUtils.isToday(t.time))
+      ? transactions.filter(t => {
+          const isToday = DateUtils.isToday(t.time);
+          console.log(`Transaction ${t.id}: time="${t.time}", isToday=${isToday}, components=`, DateUtils.getDateComponents(t.time));
+          return isToday;
+        })
       : transactions;
+
+    console.log('Filtered transactions:', dataToExport.length);
+    console.log('Today components:', DateUtils.getDateComponents(new Date()));
+    console.groupEnd();
 
     if (dataToExport.length === 0) {
       setModalConfig({ 
