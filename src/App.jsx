@@ -38,59 +38,54 @@ import {
 
 // --- 跨平台日期工具函數 ---
 const DateUtils = {
-  // 標準化日期為 YYYY-MM-DD 格式
-  formatDate: (date) => {
-    const d = new Date(date);
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  },
-
-  // 比較兩個日期是否為同一天（忽略時間）
-  isSameDay: (date1, date2) => {
-    return DateUtils.formatDate(date1) === DateUtils.formatDate(date2);
-  },
-
-  // 獲取今日日期字串
-  getTodayString: () => {
-    return DateUtils.formatDate(new Date());
-  },
-
-  // 解析時間字串（向後兼容）
+  // 解析時間字串為 Date 物件（向後兼容，增強版）
   parseTime: (timeStr) => {
     try {
+      // 如果已經是 Date 物件，直接返回
+      if (timeStr instanceof Date) {
+        return timeStr;
+      }
+
+      // 如果是數字（timestamp），直接轉換
+      if (typeof timeStr === 'number' || !isNaN(Number(timeStr))) {
+        const date = new Date(Number(timeStr));
+        if (!isNaN(date.getTime())) {
+          return date;
+        }
+      }
+
       // 首先嘗試直接解析
       let date = new Date(timeStr);
       if (!isNaN(date.getTime())) {
         return date;
       }
 
-      // 如果是數字（timestamp），直接轉換
-      if (typeof timeStr === 'number' || !isNaN(Number(timeStr))) {
-        date = new Date(Number(timeStr));
-        if (!isNaN(date.getTime())) {
-          return date;
-        }
-      }
-
       // 如果是字串，嘗試各種常見的本地化格式
       if (typeof timeStr === 'string') {
-        // 移除可能的時區訊息和多餘空格
         const cleanStr = timeStr.trim();
 
-        // 嘗試常見的分隔符替換
+        // 嘗試常見的格式變換
         const formats = [
           cleanStr,
-          cleanStr.replace(/[年月]/g, '/').replace(/[日時]/g, ' ').replace(/[分秒]/g, ':'),
+          // 處理中文格式：2025年12月8日 -> 2025/12/8
+          cleanStr.replace(/年/g, '/').replace(/月/g, '/').replace(/日/g, ''),
+          // 處理各種分隔符
           cleanStr.replace(/\//g, '-'),
           cleanStr.replace(/-/g, '/'),
+          cleanStr.replace(/\./g, '/'),
+          // 移除時區信息
+          cleanStr.replace(/\s*GMT.*$/, ''),
+          cleanStr.replace(/\s*UTC.*$/, ''),
         ];
 
         for (const format of formats) {
-          date = new Date(format);
-          if (!isNaN(date.getTime())) {
-            return date;
+          try {
+            date = new Date(format);
+            if (!isNaN(date.getTime())) {
+              return date;
+            }
+          } catch (e) {
+            // 忽略個別格式的錯誤，繼續嘗試下一個
           }
         }
       }
@@ -102,6 +97,52 @@ const DateUtils = {
       console.warn('日期解析發生異常:', timeStr, e);
       return new Date();
     }
+  },
+
+  // 獲取日期的數值組件（年月日）
+  getDateComponents: (dateInput) => {
+    const date = DateUtils.parseTime(dateInput);
+    return {
+      year: date.getFullYear(),
+      month: date.getMonth(), // 0-11
+      day: date.getDate()     // 1-31
+    };
+  },
+
+  // 比較兩個日期是否為同一天（使用數值比較，最可靠）
+  isSameDay: (date1, date2) => {
+    try {
+      const d1 = DateUtils.getDateComponents(date1);
+      const d2 = DateUtils.getDateComponents(date2);
+      return d1.year === d2.year && d1.month === d2.month && d1.day === d2.day;
+    } catch (e) {
+      console.warn('日期比較失敗:', date1, date2, e);
+      return false;
+    }
+  },
+
+  // 檢查日期是否為今日
+  isToday: (dateInput) => {
+    return DateUtils.isSameDay(dateInput, new Date());
+  },
+
+  // 標準化日期為 YYYY-MM-DD 格式（用於顯示和調試）
+  formatDate: (dateInput) => {
+    try {
+      const date = DateUtils.parseTime(dateInput);
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    } catch (e) {
+      console.warn('日期格式化失敗:', dateInput, e);
+      return DateUtils.formatDate(new Date());
+    }
+  },
+
+  // 獲取今日日期字串
+  getTodayString: () => {
+    return DateUtils.formatDate(new Date());
   }
 };
 
@@ -1178,10 +1219,9 @@ export default function App() {
       return 0; // 如果 transactions 為 null（載入中），返回 0
     }
 
-    const todayStr = DateUtils.getTodayString();
     return transactions.reduce((acc, t) => {
-      const transactionDate = DateUtils.parseTime(t.time);
-      if (DateUtils.formatDate(transactionDate) === todayStr) {
+      // 🔧 使用數值比較方式，避免字串格式化問題
+      if (DateUtils.isToday(t.time)) {
         return acc + t.total;
       }
       return acc;
@@ -1193,17 +1233,15 @@ export default function App() {
     if (!transactions || !Array.isArray(transactions)) return [];
 
     if (historyViewMode === 'today') {
-      const todayStr = DateUtils.getTodayString();
       const filtered = transactions.filter(t => {
-        const transactionDate = DateUtils.parseTime(t.time);
-        const formattedDate = DateUtils.formatDate(transactionDate);
-        return formattedDate === todayStr;
+        // 🔧 使用數值比較方式，避免字串格式化問題
+        return DateUtils.isToday(t.time);
       });
 
       // 添加調試信息 (可選 - 生產環境可移除)
       if (process.env.NODE_ENV === 'development') {
         const debugInfo = {
-          todayStr,
+          todayString: DateUtils.getTodayString(),
           totalTransactions: transactions.length,
           todayTransactions: filtered.length,
           userAgent: navigator.userAgent,
@@ -1211,11 +1249,11 @@ export default function App() {
           transactionDetails: transactions.slice(0, 3).map(t => ({
             originalTime: t.time,
             parsedDate: DateUtils.parseTime(t.time),
-            formattedDate: DateUtils.formatDate(DateUtils.parseTime(t.time)),
-            matchesToday: DateUtils.formatDate(DateUtils.parseTime(t.time)) === todayStr
+            isToday: DateUtils.isToday(t.time),
+            dateComponents: DateUtils.getDateComponents(t.time)
           }))
         };
-        console.log('Debug - Date Filtering:', debugInfo);
+        console.log('🔧 Debug - Enhanced Date Filtering:', debugInfo);
       }
 
       return filtered;
@@ -1819,14 +1857,9 @@ export default function App() {
 
   // --- 核心匯出邏輯 (Data Processing) ---
   const exportData = (dataType, scope) => {
-    const todayStr = DateUtils.getTodayString();
-
-    // 1. 篩選資料範圍
+    // 1. 篩選資料範圍 - 🔧 使用數值比較方式避免字串格式化問題
     const dataToExport = scope === 'today'
-      ? transactions.filter(t => {
-          const transactionDate = DateUtils.parseTime(t.time);
-          return DateUtils.formatDate(transactionDate) === todayStr;
-        })
+      ? transactions.filter(t => DateUtils.isToday(t.time))
       : transactions;
 
     if (dataToExport.length === 0) {
