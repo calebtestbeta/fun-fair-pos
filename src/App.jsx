@@ -725,51 +725,36 @@ const Modal = ({
           <div className="flex-1 p-8 overflow-y-auto">
             {message && <p className="text-gray-800 text-xl font-medium mb-6 leading-relaxed whitespace-pre-line">{message}</p>}
             
-            {/* Export Menu 介面 */}
+            {/* Export Menu 介面 - 🔧 園遊會單日模式 */}
             {type === 'export-menu' && (
-              <div className="flex flex-col gap-8">
-                {/* 今日資料區 */}
+              <div className="flex flex-col gap-6">
                 <div>
-                  <h4 className="text-xl font-black text-green-700 mb-4 flex items-center gap-2 border-b-2 border-green-100 pb-2">
-                    <CheckCircle size={24} /> 今日結算資料 (Today)
+                  <h4 className="text-xl font-black text-blue-700 mb-6 flex items-center gap-3 border-b-2 border-blue-100 pb-3">
+                    <FolderOpen size={28} /> 匯出園遊會資料
                   </h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    <button 
-                      onClick={() => onExportAction('orders', 'today')} 
-                      className="flex flex-col items-center justify-center p-6 bg-green-50 border-2 border-green-200 hover:bg-green-100 rounded-2xl transition-all active:scale-95 group"
-                    >
-                      <Download size={32} className="text-green-600 mb-2 group-hover:scale-110 transition-transform" />
-                      <span className="font-bold text-lg text-green-800">匯出訂單明細</span>
-                    </button>
-                    <button 
-                      onClick={() => onExportAction('products', 'today')}
-                      className="flex flex-col items-center justify-center p-6 bg-green-50 border-2 border-green-200 hover:bg-green-100 rounded-2xl transition-all active:scale-95 group"
-                    >
-                      <FileText size={32} className="text-green-600 mb-2 group-hover:scale-110 transition-transform" />
-                      <span className="font-bold text-lg text-green-800">匯出商品統計</span>
-                    </button>
+                  <div className="text-center mb-6">
+                    <div className="bg-blue-50 px-4 py-2 rounded-xl border border-blue-200 inline-block">
+                      <span className="text-blue-700 font-bold text-lg">
+                        📅 {DateUtils.formatDate(new Date())} 的營業資料
+                      </span>
+                    </div>
                   </div>
-                </div>
-
-                {/* 完整歷史區 */}
-                <div>
-                  <h4 className="text-xl font-black text-slate-600 mb-4 flex items-center gap-2 border-b-2 border-slate-100 pb-2">
-                    <History size={24} /> 完整歷史紀錄 (All Time)
-                  </h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    <button 
-                      onClick={() => onExportAction('orders', 'all')}
-                      className="flex flex-col items-center justify-center p-6 bg-slate-50 border-2 border-slate-200 hover:bg-slate-100 rounded-2xl transition-all active:scale-95 group"
+                  <div className="grid grid-cols-2 gap-6">
+                    <button
+                      onClick={() => onExportAction('orders', 'today')}
+                      className="flex flex-col items-center justify-center p-8 bg-blue-50 border-2 border-blue-200 hover:bg-blue-100 rounded-2xl transition-all active:scale-95 group"
                     >
-                      <Download size={32} className="text-slate-500 mb-2 group-hover:scale-110 transition-transform" />
-                      <span className="font-bold text-lg text-slate-700">匯出所有訂單</span>
+                      <Download size={40} className="text-blue-600 mb-3 group-hover:scale-110 transition-transform" />
+                      <span className="font-bold text-xl text-blue-800">匯出訂單明細</span>
+                      <span className="text-sm text-blue-600 mt-1">包含所有交易紀錄</span>
                     </button>
-                    <button 
-                      onClick={() => onExportAction('products', 'all')}
-                      className="flex flex-col items-center justify-center p-6 bg-slate-50 border-2 border-slate-200 hover:bg-slate-100 rounded-2xl transition-all active:scale-95 group"
+                    <button
+                      onClick={() => onExportAction('products', 'today')}
+                      className="flex flex-col items-center justify-center p-8 bg-blue-50 border-2 border-blue-200 hover:bg-blue-100 rounded-2xl transition-all active:scale-95 group"
                     >
-                      <FileText size={32} className="text-slate-500 mb-2 group-hover:scale-110 transition-transform" />
-                      <span className="font-bold text-lg text-slate-700">匯出所有統計</span>
+                      <FileText size={40} className="text-blue-600 mb-3 group-hover:scale-110 transition-transform" />
+                      <span className="font-bold text-xl text-blue-800">匯出商品統計</span>
+                      <span className="text-sm text-blue-600 mt-1">銷售量與庫存報表</span>
                     </button>
                   </div>
                 </div>
@@ -1061,7 +1046,6 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [lastSound, setLastSound] = useState(null);
   const [modalConfig, setModalConfig] = useState({ isOpen: false });
-  const [historyViewMode, setHistoryViewMode] = useState('today'); // 銷售紀錄顯示模式：今日/全部
 
   // 編輯訂單時的付款狀態
   const [editReceivedAmount, setEditReceivedAmount] = useState('');
@@ -1246,49 +1230,38 @@ export default function App() {
     }, 0);
   }, [transactions]);
 
-  // 銷售紀錄篩選邏輯
+  // 銷售紀錄篩選邏輯 - 🔧 園遊會單日模式：始終只顯示今日資料
   const filteredTransactions = useMemo(() => {
     if (!transactions || !Array.isArray(transactions)) return [];
 
-    if (historyViewMode === 'today') {
-      const filtered = transactions.filter(t => {
-        // 🔧 使用數值比較方式，避免字串格式化問題
-        return DateUtils.isToday(t.time);
-      });
+    const filtered = transactions.filter(t => {
+      // 🔧 使用數值比較方式，避免字串格式化問題
+      return DateUtils.isToday(t.time);
+    });
 
-      // 添加調試信息 (可選 - 生產環境可移除)
-      if (process.env.NODE_ENV === 'development') {
-        const debugInfo = {
-          todayString: DateUtils.getTodayString(),
-          totalTransactions: transactions.length,
-          todayTransactions: filtered.length,
-          userAgent: navigator.userAgent,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          transactionDetails: transactions.slice(0, 3).map(t => ({
-            originalTime: t.time,
-            parsedDate: DateUtils.parseTime(t.time),
-            isToday: DateUtils.isToday(t.time),
-            dateComponents: DateUtils.getDateComponents(t.time)
-          }))
-        };
-        console.log('🔧 Debug - Enhanced Date Filtering:', debugInfo);
-      }
-
-      return filtered;
+    // 添加調試信息 (可選 - 生產環境可移除)
+    if (process.env.NODE_ENV === 'development') {
+      const debugInfo = {
+        todayString: DateUtils.getTodayString(),
+        totalTransactions: transactions.length,
+        todayTransactions: filtered.length,
+        userAgent: navigator.userAgent,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        transactionDetails: transactions.slice(0, 3).map(t => ({
+          originalTime: t.time,
+          parsedDate: DateUtils.parseTime(t.time),
+          isToday: DateUtils.isToday(t.time),
+          dateComponents: DateUtils.getDateComponents(t.time)
+        }))
+      };
+      console.log('🔧 Debug - 園遊會單日模式篩選:', debugInfo);
     }
 
-    return transactions;
-  }, [transactions, historyViewMode]);
+    return filtered;
+  }, [transactions]);
 
-  // 動態營收計算
-  const displayedRevenue = useMemo(() => {
-    if (historyViewMode === 'today') {
-      return todayTotal; // 使用現有的今日營收計算
-    }
-
-    // 計算全部營收
-    return filteredTransactions.reduce((acc, t) => acc + t.total, 0);
-  }, [historyViewMode, todayTotal, filteredTransactions]);
+  // 營收計算 - 🔧 園遊會單日模式：始終顯示今日營收
+  const displayedRevenue = todayTotal;
 
   const playSound = (type) => {
     setLastSound(type);
@@ -2171,52 +2144,55 @@ export default function App() {
                  <div className="flex items-center gap-6">
                    <h2 className="text-3xl font-black text-gray-800 flex items-center gap-3">
                      <History className="text-blue-600" size={36} />
-                     {historyViewMode === 'today' ? '本日銷售紀錄' : '完整銷售紀錄'}
+                     本日銷售紀錄
                    </h2>
 
-                   {/* 今日/全部切換按鈕組 */}
-                   <div className="flex bg-gray-100 rounded-xl p-1 border-2 border-gray-200">
-                     <button
-                       onClick={() => setHistoryViewMode('today')}
-                       className={`px-4 py-2 rounded-lg font-bold text-lg transition-all ${
-                         historyViewMode === 'today'
-                           ? 'bg-blue-600 text-white shadow-md'
-                           : 'text-gray-600 hover:bg-gray-200'
-                       }`}
-                     >
-                       今日
-                     </button>
-                     <button
-                       onClick={() => setHistoryViewMode('all')}
-                       className={`px-4 py-2 rounded-lg font-bold text-lg transition-all ${
-                         historyViewMode === 'all'
-                           ? 'bg-blue-600 text-white shadow-md'
-                           : 'text-gray-600 hover:bg-gray-200'
-                       }`}
-                     >
-                       全部
-                     </button>
+                   {/* 顯示當前日期 */}
+                   <div className="bg-blue-50 px-4 py-2 rounded-xl border border-blue-200">
+                     <span className="text-blue-700 font-bold text-lg">
+                       {DateUtils.formatDate(new Date())}
+                     </span>
                    </div>
                  </div>
 
                  <div className="flex gap-4 items-center">
                     <button onClick={handleOpenExportMenu} className="flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl shadow-lg font-bold text-xl transition-colors"><FolderOpen size={24} /> 匯出報表選單</button>
-                    <div className="bg-blue-50 px-6 py-4 rounded-xl border-2 border-blue-200 shadow-sm ml-4">
-                      <span className="text-blue-700 font-bold text-xl">
-                        {historyViewMode === 'today' ? '今日總營收：' : '總營收：'}
+
+                    {/* 交易數量指示器 */}
+                    <div className="bg-green-50 px-6 py-4 rounded-xl border-2 border-green-200 shadow-sm">
+                      <div className="flex items-center gap-2 mb-1">
+                        <CheckCircle className="text-green-600" size={20} />
+                        <span className="text-green-700 font-bold text-lg">今日交易數量</span>
+                      </div>
+                      <span className="text-3xl font-black text-green-900">
+                        {filteredTransactions.length} 筆
                       </span>
-                      <span className="text-4xl font-black text-blue-900 ml-2">
+                    </div>
+
+                    {/* 營收指示器 */}
+                    <div className="bg-blue-50 px-6 py-4 rounded-xl border-2 border-blue-200 shadow-sm">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Coins className="text-blue-600" size={20} />
+                        <span className="text-blue-700 font-bold text-lg">今日總營收</span>
+                      </div>
+                      <span className="text-3xl font-black text-blue-900">
                         ${displayedRevenue.toLocaleString()}
                       </span>
                     </div>
                  </div>
                </div>
                {filteredTransactions.length === 0 ? (
-                 <div className="text-center py-32 bg-gray-50 rounded-3xl border-4 border-dashed border-gray-300">
-                   <AlertCircle className="mx-auto text-gray-300 mb-4" size={80} />
-                   <p className="text-3xl font-bold text-gray-400">
-                     {historyViewMode === 'today' ? '今日尚無交易資料' : '目前尚無交易資料'}
+                 <div className="text-center py-32 bg-blue-50 rounded-3xl border-4 border-dashed border-blue-200">
+                   <Package className="mx-auto text-blue-300 mb-6" size={100} />
+                   <p className="text-3xl font-black text-blue-600 mb-2">
+                     今日尚無交易資料
                    </p>
+                   <p className="text-xl text-blue-500 font-medium">
+                     📅 {DateUtils.formatDate(new Date())} - 園遊會營業即將開始
+                   </p>
+                   <div className="mt-6 text-lg text-blue-400">
+                     💡 開始掃描商品條碼或點擊商品即可建立第一筆交易
+                   </div>
                  </div>
                ) : (
                  <div className="bg-white rounded-2xl shadow-lg border-2 border-gray-200 overflow-hidden">
