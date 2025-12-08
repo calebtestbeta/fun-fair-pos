@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { 
-  ShoppingCart, 
-  Trash2, 
-  History, 
-  Settings, 
-  Plus, 
-  Minus, 
-  Search, 
-  CreditCard, 
-  Monitor, 
-  Package, 
+import {
+  ShoppingCart,
+  Trash2,
+  History,
+  Settings,
+  Plus,
+  Minus,
+  Search,
+  CreditCard,
+  Monitor,
+  Package,
   QrCode,
   Volume2,
   AlertCircle,
@@ -30,10 +30,11 @@ import {
   Delete,
   FileDown,
   Keyboard,
-  ScanLine, 
+  ScanLine,
   CheckSquare,
   ArchiveRestore,
-  FolderOpen // 新增圖示
+  FolderOpen, // 新增圖示
+  ChevronDown // Debug 視窗摺疊圖示
 } from 'lucide-react';
 
 // --- 跨平台日期工具函數 ---
@@ -1049,6 +1050,9 @@ export default function App() {
 
   // 編輯訂單時的付款狀態
   const [editReceivedAmount, setEditReceivedAmount] = useState('');
+
+  // Debug 視窗展開狀態
+  const [debugExpanded, setDebugExpanded] = useState(false);
   const barcodeInputRef = useRef(null);
   const fileInputRef = useRef(null);
   const lastScanTimeRef = useRef(0);
@@ -1278,6 +1282,55 @@ export default function App() {
   const closeStockWarningModal = () => {
     setModalConfig({ ...modalConfig, isOpen: false });
     // 注意：不重新聚焦條碼輸入欄，保持在修改訂單頁面
+  };
+
+  // 🔍 Debug 視窗：讀取 localStorage 資料
+  const getLocalStorageDebugData = () => {
+    const debugData = {};
+
+    // 定義所有要檢查的 localStorage keys
+    const keysToCheck = [
+      { key: STORAGE_KEYS.IS_DEMO_MODE, label: 'Demo 模式狀態' },
+      { key: STORAGE_KEYS.PRODUCTS, label: '正常模式 - 商品資料' },
+      { key: STORAGE_KEYS.TRANSACTIONS, label: '正常模式 - 交易紀錄' },
+      { key: STORAGE_KEYS.IMPORTED_SNAPSHOT, label: '正常模式 - 匯入快照' },
+      { key: STORAGE_KEYS.PRODUCTS_DEMO, label: 'Demo模式 - 商品資料' },
+      { key: STORAGE_KEYS.TRANSACTIONS_DEMO, label: 'Demo模式 - 交易紀錄' },
+      { key: STORAGE_KEYS.IMPORTED_SNAPSHOT_DEMO, label: 'Demo模式 - 匯入快照' },
+      { key: STORAGE_KEYS.SETTINGS, label: '系統設定' }
+    ];
+
+    keysToCheck.forEach(({ key, label }) => {
+      try {
+        const rawData = localStorage.getItem(key);
+        if (rawData === null) {
+          debugData[label] = '🚫 未設定';
+        } else {
+          try {
+            // 嘗試解析為 JSON
+            const parsed = JSON.parse(rawData);
+            debugData[label] = {
+              raw: rawData,
+              parsed: parsed,
+              pretty: JSON.stringify(parsed, null, 2),
+              type: Array.isArray(parsed) ? `Array[${parsed.length}]` : typeof parsed
+            };
+          } catch (e) {
+            // 如果不是 JSON，顯示原始字串
+            debugData[label] = {
+              raw: rawData,
+              parsed: rawData,
+              pretty: rawData,
+              type: 'String'
+            };
+          }
+        }
+      } catch (error) {
+        debugData[label] = `❌ 錯誤: ${error.message}`;
+      }
+    });
+
+    return debugData;
   };
 
   // 🔔 庫存不足警告處理函數
@@ -2025,7 +2078,7 @@ export default function App() {
           <div className="bg-blue-600 p-2 rounded-xl"><Monitor size={28} className="text-white" /></div>
           <div className="flex flex-col">
             <h1 className="font-black text-2xl tracking-wide">園遊會 POS <span className="bg-yellow-500 text-black px-2 rounded text-sm ml-2 font-bold">高齡友善版</span></h1>
-            <span className="text-sm text-gray-400">大字體模式 v3.0</span>
+            <span className="text-sm text-gray-400">大字體模式 v3.10.0</span>
           </div>
         </div>
         <nav className="flex bg-slate-800 rounded-xl p-1.5 gap-1">
@@ -2323,23 +2376,77 @@ export default function App() {
 
                   {/* Demo 資料管理 */}
                   {isDemoMode && (
-                    <div className="bg-orange-50 rounded-2xl p-6 border-2 border-orange-200">
-                      <div className="flex items-center gap-3 mb-4">
-                        <RefreshCw className="text-orange-600" size={24} />
-                        <h4 className="text-xl font-black text-orange-800">Demo 資料管理</h4>
+                    <div className="space-y-6">
+                      <div className="bg-orange-50 rounded-2xl p-6 border-2 border-orange-200">
+                        <div className="flex items-center gap-3 mb-4">
+                          <RefreshCw className="text-orange-600" size={24} />
+                          <h4 className="text-xl font-black text-orange-800">Demo 資料管理</h4>
+                        </div>
+                        <p className="text-orange-700 mb-4 font-medium">
+                          如果您在 Demo 模式中刪除了交易或修改了庫存，可以使用下方按鈕恢復為原始的示範資料。
+                        </p>
+                        <button
+                          onClick={handleResetDemoData}
+                          className="w-full py-4 rounded-xl bg-orange-500 text-white font-black text-xl shadow-lg hover:bg-orange-600 active:scale-95 transition-all flex items-center justify-center gap-3"
+                        >
+                          <RotateCcw size={24} /> 🔄 重置為原始 Demo 資料
+                        </button>
+                        <p className="text-center text-orange-600 mt-3 text-sm font-bold">
+                          這將恢復所有原始的交易紀錄和商品庫存
+                        </p>
                       </div>
-                      <p className="text-orange-700 mb-4 font-medium">
-                        如果您在 Demo 模式中刪除了交易或修改了庫存，可以使用下方按鈕恢復為原始的示範資料。
-                      </p>
-                      <button
-                        onClick={handleResetDemoData}
-                        className="w-full py-4 rounded-xl bg-orange-500 text-white font-black text-xl shadow-lg hover:bg-orange-600 active:scale-95 transition-all flex items-center justify-center gap-3"
-                      >
-                        <RotateCcw size={24} /> 🔄 重置為原始 Demo 資料
-                      </button>
-                      <p className="text-center text-orange-600 mt-3 text-sm font-bold">
-                        這將恢復所有原始的交易紀錄和商品庫存
-                      </p>
+
+                      {/* Debug 視窗 */}
+                      <div className="bg-slate-50 rounded-2xl border-2 border-slate-200">
+                        <button
+                          onClick={() => setDebugExpanded(!debugExpanded)}
+                          className="w-full p-4 text-left flex items-center justify-between hover:bg-slate-100 transition-colors rounded-2xl"
+                        >
+                          <div className="flex items-center gap-3">
+                            <Monitor className="text-slate-600" size={24} />
+                            <h4 className="text-xl font-black text-slate-800">開發者除錯視窗</h4>
+                          </div>
+                          <div className={`transition-transform duration-200 ${debugExpanded ? 'rotate-180' : ''}`}>
+                            <ChevronDown className="text-slate-600" size={24} />
+                          </div>
+                        </button>
+
+                        {debugExpanded && (
+                          <div className="px-6 pb-6 border-t border-slate-200">
+                            <div className="bg-slate-800 rounded-xl p-4 overflow-hidden">
+                              <div className="flex items-center gap-2 mb-4">
+                                <FileText className="text-green-400" size={20} />
+                                <span className="text-green-400 font-bold text-lg">LocalStorage 資料檢視</span>
+                              </div>
+                              <div className="space-y-4 max-h-96 overflow-y-auto">
+                                {Object.entries(getLocalStorageDebugData()).map(([label, data]) => (
+                                  <div key={label} className="border-b border-slate-600 pb-3 last:border-b-0">
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <span className="text-blue-400 font-bold text-base">{label}</span>
+                                      {typeof data === 'object' && data.type && (
+                                        <span className="text-xs bg-slate-700 text-slate-300 px-2 py-1 rounded">
+                                          {data.type}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="bg-slate-900 rounded-lg p-3 overflow-x-auto">
+                                      <pre className="text-green-300 text-sm leading-relaxed font-mono">
+                                        {typeof data === 'string'
+                                          ? data
+                                          : data.pretty || JSON.stringify(data, null, 2)
+                                        }
+                                      </pre>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            <p className="text-center text-slate-600 mt-3 text-sm font-medium">
+                              此視窗顯示所有 localStorage 儲存的資料，供開發除錯使用
+                            </p>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
